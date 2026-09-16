@@ -1,0 +1,43 @@
+LICENSE
+  s_057db35e4d626e::t_afde0e291d5081 1-456
+gradle/wrapper/gradle-wrapper.properties
+  s_057db35e4d626e::t_7a100886898b9c 1-9
+gradlew
+  s_057db35e4d626e::t_54de71570790f3 1-248
+gradlew.bat
+  s_057db35e4d626e::t_597a5ad753db61 1-82
+.github/workflows/ci.yml
+  s_057db35e4d626e::t_2df00347926236 1-20
+.github/workflows/publish.yml
+  s_057db35e4d626e::t_845c3250743ada 1-31
+.gitignore
+  s_057db35e4d626e::t_383cfeff11c51d 1-8
+README.md
+  s_057db35e4d626e::t_b5f28d36cf914d 1-66
+build.gradle.kts
+  s_057db35e4d626e::t_937659f1b141e7 1-39
+settings.gradle.kts
+  s_057db35e4d626e::t_378b5b0bcac271 1-8
+src/main/java/org/exist/moderne/XQueryDynamicInvocationCoverage.java
+  s_057db35e4d626e::t_ba3447e4d46d82 1-272
+src/main/java/org/exist/moderne/XQueryDynamicInvocationCoverageTable.java
+  s_057db35e4d626e::t_aaf38beb0f310b 1-70
+src/test/java/org/exist/moderne/XQueryDynamicInvocationCoverageTest.java
+  s_057db35e4d626e::t_6fe81ebaa268d0 1-213
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "08932891a1b4bfa53375c48aabcb8aafefa0d182",
+  "prompts": {},
+  "sessions": {
+    "s_057db35e4d626e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7d098492-80f8-475a-9242-9398c5410f52",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
