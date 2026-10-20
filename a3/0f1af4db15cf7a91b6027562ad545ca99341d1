@@ -1,0 +1,22 @@
+build.gradle.kts
+  s_e871fd49c7ec58::t_60464b11c2ad5a 46-51
+settings.gradle.kts
+  s_e871fd49c7ec58::t_517107a692b056 7-10
+  s_e871fd49c7ec58::t_c148c85b110229 11-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a30f1af4db15cf7a91b6027562ad545ca99341d1",
+  "prompts": {},
+  "sessions": {
+    "s_e871fd49c7ec58": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "57c74ced-8114-415d-a750-d88673fe3f5f",
+        "model": "default"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
