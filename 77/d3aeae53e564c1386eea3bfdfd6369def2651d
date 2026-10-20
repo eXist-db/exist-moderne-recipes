@@ -1,0 +1,23 @@
+src/main/resources/META-INF/rewrite/exist7-upgrade.yml
+  s_a7d6e6f60f68e5::t_7dff14e64e4e4d 73-74
+  s_a7d6e6f60f68e5::t_dba73c2f2163e2 86,340-354
+src/test/java/org/exist/moderne/exist7/Exist7LeafRecipesTest.java
+  s_a7d6e6f60f68e5::t_cb4e4a3d8603cb 33-56
+  s_a7d6e6f60f68e5::t_48cad0e28de3d2 32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "77d3aeae53e564c1386eea3bfdfd6369def2651d",
+  "prompts": {},
+  "sessions": {
+    "s_a7d6e6f60f68e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0026424-4a8c-4bda-aabf-6c3cb9af1842",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
