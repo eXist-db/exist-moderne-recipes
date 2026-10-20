@@ -31,12 +31,12 @@ public class XQueryDynamicInvocationCoverageTable extends DataTable<XQueryDynami
     public XQueryDynamicInvocationCoverageTable(final Recipe recipe) {
         super(recipe,
                 "XQuery dynamic-invocation coverage",
-                "Corrects the static test-gap analysis for BasicFunction#eval() overrides: " +
+                "Corrects the static test-gap analysis for XQuery Function#eval() overrides: " +
                         "a builtin XQuery function is dispatched by name through the query engine, " +
                         "not called directly from Java, so a static call-graph analysis can never see " +
                         "the edge from a test to eval(). This table cross-references each function's " +
-                        "QName local name against string literals (Java test sources) and raw text " +
-                        "(XQSuite .xql/.xqm modules, XML test fixtures) under test paths, to report " +
+                        "QName local name against XQuery calls in string literals (Java test sources) and " +
+                        "raw text (XQSuite modules, XML fixtures, other resources) in test source sets, to report " +
                         "whether the function is actually exercised by a test despite that blind spot.");
     }
 
@@ -48,17 +48,18 @@ public class XQueryDynamicInvocationCoverageTable extends DataTable<XQueryDynami
         String sourcePath;
 
         @Column(displayName = "Class name",
-                description = "Fully qualified name of the BasicFunction subclass.")
+                description = "Fully qualified name of the org.exist.xquery.Function subclass.")
         String className;
 
         @Column(displayName = "QName local name",
-                description = "The XQuery function's local name, as passed to `new QName(...)` in the " +
-                        "function's signature.")
+                description = "The XQuery function's local name, as registered by its `FunctionSignature` " +
+                        "(directly, via `new QName(...)`, or through a String/QName constant).")
         String localName;
 
         @Column(displayName = "Dynamically invoked in tests",
-                description = "True if a test source or resource contains a string matching " +
-                        "\"<localName>(\", indicating the function is likely exercised via XQuery " +
+                description = "True if a test source or resource calls `[prefix:]<localName>(`, references " +
+                        "`<localName>#arity`, or looks it up via `xs:QName('[prefix:]<localName>')` outside " +
+                        "an XQuery comment, indicating the function is likely exercised via XQuery " +
                         "string dispatch even though no direct Java call exists.")
         boolean dynamicallyInvokedInTests;
 

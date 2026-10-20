@@ -10,16 +10,29 @@ installed into CI (or a local `mod` CLI) without vendoring the source into `exis
 ### `org.exist.moderne.XQueryDynamicInvocationCoverage`
 
 Corrects a systematic blind spot in Moderne Prethink's `test-gaps.csv` for this codebase:
-`BasicFunction#eval()` overrides (i.e. essentially every builtin XQuery function implementation)
-are dispatched by QName through the query engine at runtime, not called directly from Java, so a
-static call-graph analysis can never see the edge from a test to `eval()` and always reports it
-as untested.
+`eval()` overrides of `org.exist.xquery.Function` subclasses (including `BasicFunction`, i.e.
+essentially every builtin XQuery function implementation) are dispatched by QName through the
+query engine at runtime, not called directly from Java, so a static call-graph analysis can never
+see the edge from a test to `eval()` and always reports it as untested.
 
-This recipe cross-references each function's QName local name (from `new QName(...)` calls, or
-the `FunctionDSL.functionSignature(name, ...)` helper pattern, including through a same-class
-`static final String` constant) against string literals in Java test sources and raw text in
-test resources (XQSuite `.xql`/`.xqm` modules, XML fixtures), and emits an
-`XQueryDynamicInvocationCoverageTable` data table reporting whether each function is actually
+For each function class (excluding `UserDefinedFunction`), the recipe takes the local name(s)
+registered by its `FunctionSignature` — the first argument to `new FunctionSignature(...)` or a
+`functionSignature(...)`/`functionSignatures(...)` helper, given inline, as `new QName("...", ...)`,
+or through a `String`/`QName` constant declared anywhere in the codebase. QNames built for other
+purposes (e.g. result elements inside `eval()`) are ignored.
+
+It then searches every file in a test source set (`src/test*/`, `src/*Test/`, or a top-level
+`test/`/`tests/` directory) — string literals in Java tests (with `"a" + "b"` concatenations
+folded), and the full text of any other test resource: XQSuite modules, XML fixtures, and so on —
+for:
+
+- calls: `prefix:name(` or `name (` (the name must start at a name boundary, so `fn:local-name(`
+  does not count as a call to `name`),
+- function references: `prefix:name#1`,
+- lookups: `xs:QName('prefix:name')`,
+
+ignoring XQuery `(: comments :)` and `declare function` declarations. The resulting
+`XQueryDynamicInvocationCoverageTable` data table reports whether each function is actually
 exercised by a test.
 
 It's a best-effort heuristic (matches on QName local name only, not the full namespace-qualified
