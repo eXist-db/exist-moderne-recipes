@@ -1,0 +1,27 @@
+README.md
+  s_f7b446d44a868b::t_12261dbe0fbda0 13-35
+src/main/java/org/exist/moderne/XQueryDynamicInvocationCoverageTable.java
+  s_f7b446d44a868b::t_12261dbe0fbda0 34,38-39,51,55-56,60-62
+src/test/java/org/exist/moderne/XQueryDynamicInvocationCoverageTest.java
+  s_f7b446d44a868b::t_12261dbe0fbda0 25,27,32,37,41-46,49-63,74-119,123-135,144-156,165-170,172-182,201-308,312-453
+build.gradle.kts
+  s_f7b446d44a868b::t_12261dbe0fbda0 58
+src/main/java/org/exist/moderne/XQueryDynamicInvocationCoverage.java
+  s_f7b446d44a868b::t_12261dbe0fbda0 27-28,31,34,41,44,51-52,56-59,61-71,75,81,83-84,87-101,106,120,125,127,129-133,146,149-161,171-189,192-252,255-265,274-284,286-291,294,297-298,304-311,316,318-328,337-338,349,354-356,359-360,362-364,367-412,416-424,426-428,433,438-448,451-454,456-478
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5641ff14c3fc2fe366ef71744ddfa09e8cb28e94",
+  "prompts": {},
+  "sessions": {
+    "s_f7b446d44a868b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "414cfccf-acee-41d5-bd29-6f487bdb1efb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
