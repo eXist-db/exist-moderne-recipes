@@ -35,8 +35,8 @@ public class XQueryDynamicInvocationCoverageTable extends DataTable<XQueryDynami
                         "a builtin XQuery function is dispatched by name through the query engine, " +
                         "not called directly from Java, so a static call-graph analysis can never see " +
                         "the edge from a test to eval(). This table cross-references each function's " +
-                        "QName local name against XQuery calls in string literals (Java test sources) and " +
-                        "raw text (XQSuite modules, XML fixtures, other resources) in test source sets, to report " +
+                        "QName against the XQuery calls in the code test suites execute (XQSuite modules, " +
+                        "XML TestSets, Java test string literals, and the test runner libraries), to report " +
                         "whether the function is actually exercised by a test despite that blind spot.");
     }
 
@@ -51,21 +51,27 @@ public class XQueryDynamicInvocationCoverageTable extends DataTable<XQueryDynami
                 description = "Fully qualified name of the org.exist.xquery.Function subclass.")
         String className;
 
+        @Column(displayName = "QName namespace URI",
+                description = "The XQuery function's namespace URI, or empty if it could not be resolved, " +
+                        "in which case tests are matched on the local name alone.")
+        String namespaceUri;
+
         @Column(displayName = "QName local name",
                 description = "The XQuery function's local name, as registered by its `FunctionSignature` " +
-                        "(directly, via `new QName(...)`, or through a String/QName constant).")
+                        "(directly, via `new QName(...)`, through a String/QName constant, or via a module's " +
+                        "`functionSignature(...)` helper).")
         String localName;
 
         @Column(displayName = "Dynamically invoked in tests",
-                description = "True if a test source or resource calls `[prefix:]<localName>(`, references " +
-                        "`<localName>#arity`, or looks it up via `xs:QName('[prefix:]<localName>')` outside " +
-                        "an XQuery comment, indicating the function is likely exercised via XQuery " +
-                        "string dispatch even though no direct Java call exists.")
+                description = "True if code a test suite executes calls `prefix:<localName>(`, references " +
+                        "`prefix:<localName>#arity`, or looks it up via `xs:QName('prefix:<localName>')`, " +
+                        "with the prefix bound to this function's namespace, indicating the function is " +
+                        "likely exercised via XQuery string dispatch even though no direct Java call exists.")
         boolean dynamicallyInvokedInTests;
 
         @Column(displayName = "Matching test paths",
                 description = "Semicolon-separated paths of the test sources/resources whose text " +
-                        "matched this function's local name, or empty if none matched.")
+                        "matched this function, or empty if none matched.")
         String matchingTestPaths;
     }
 }

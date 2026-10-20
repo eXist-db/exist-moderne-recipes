@@ -21,6 +21,7 @@
  */
 package org.exist.moderne;
 
+import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.Test;
 import org.openrewrite.test.RecipeSpec;
 import org.openrewrite.test.RewriteTest;
@@ -33,6 +34,10 @@ import static org.openrewrite.xml.Assertions.xml;
 
 class XQueryDynamicInvocationCoverageTest implements RewriteTest {
 
+    private static final String UTIL_NS = "http://exist-db.org/xquery/util";
+    private static final String FN_NS = "http://www.w3.org/2005/xpath-functions";
+    private static final String NGRAM_NS = "http://exist-db.org/xquery/ngram";
+
     @Override
     public void defaults(final RecipeSpec spec) {
         spec.recipe(new XQueryDynamicInvocationCoverage());
@@ -41,6 +46,7 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
     private static final String FUNCTION_STUB = """
             package org.exist.xquery;
             public abstract class Function {
+                public final static String BUILTIN_FUNCTION_NS = "http://www.w3.org/2005/xpath-functions";
             }
             """;
 
@@ -64,25 +70,49 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
             }
             """;
 
+    private static final String FUNCTION_DSL_STUB = """
+            package org.exist.xquery;
+            import org.exist.dom.QName;
+            public class FunctionDSL {
+                public static FunctionSignature functionSignature(QName name, String description) {
+                    return new FunctionSignature(name, description);
+                }
+            }
+            """;
+
     private static final String QNAME_STUB = """
             package org.exist.dom;
             public class QName {
                 public QName(String localName, String namespaceURI) {}
+                public QName(String localName, String namespaceURI, String prefix) {}
+                public String getLocalPart() { return null; }
             }
             """;
 
-    private static SourceSpecs[] stubs() {
-        return new SourceSpecs[]{
+    private static final String UTIL_MODULE_STUB = """
+            package org.exist.xquery.functions.util;
+            import org.exist.dom.QName;
+            import org.exist.xquery.FunctionDSL;
+            import org.exist.xquery.FunctionSignature;
+            public class UtilModule {
+                public final static String NAMESPACE_URI = "http://exist-db.org/xquery/util";
+                public final static String PREFIX = "util";
+                static FunctionSignature functionSignature(String name, String description) {
+                    return FunctionDSL.functionSignature(new QName(name, NAMESPACE_URI, PREFIX), description);
+                }
+            }
+            """;
+
+    private static SourceSpecs[] with(final SourceSpecs... specs) {
+        final SourceSpecs[] stubs = {
                 java(FUNCTION_STUB),
                 java(BASIC_FUNCTION_STUB),
                 java(USER_DEFINED_FUNCTION_STUB),
                 java(FUNCTION_SIGNATURE_STUB),
-                java(QNAME_STUB)
+                java(FUNCTION_DSL_STUB),
+                java(QNAME_STUB),
+                java(UTIL_MODULE_STUB)
         };
-    }
-
-    private static SourceSpecs[] with(final SourceSpecs... specs) {
-        final SourceSpecs[] stubs = stubs();
         final SourceSpecs[] all = new SourceSpecs[stubs.length + specs.length];
         System.arraycopy(stubs, 0, all, 0, stubs.length);
         System.arraycopy(specs, 0, all, stubs.length, specs.length);
@@ -94,7 +124,9 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
         return java("""
                 package p;
                 import org.exist.xquery.BasicFunction;
+                import org.exist.xquery.Function;
                 import org.exist.xquery.FunctionSignature;
+                import org.exist.xquery.functions.util.UtilModule;
                 import org.exist.dom.QName;
                 public class F extends BasicFunction {
                 %s
@@ -102,14 +134,15 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                 """.formatted(body));
     }
 
-    private static SourceSpecs signatureFor(final String localName) {
-        return function("public static final FunctionSignature signature = "
-                + "new FunctionSignature(new QName(\"" + localName + "\", \"ns\"), \"desc\");");
+    /** A util-module function {@code p.F} registering {@code util:<localName>}. */
+    private static SourceSpecs utilFunction(final String localName) {
+        return function("public static final FunctionSignature signature = new FunctionSignature("
+                + "new QName(\"" + localName + "\", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), \"desc\");");
     }
 
     private static XQueryDynamicInvocationCoverageTable.Row row(final String localName, final boolean hit,
             final String matchingPaths) {
-        return new XQueryDynamicInvocationCoverageTable.Row("p/F.java", "p.F", localName, hit, matchingPaths);
+        return new XQueryDynamicInvocationCoverageTable.Row("p/F.java", "p.F", UTIL_NS, localName, hit, matchingPaths);
     }
 
     private static void expect(final RecipeSpec spec, final XQueryDynamicInvocationCoverageTable.Row... rows) {
@@ -117,23 +150,22 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                 assertThat(actual).containsExactly(rows));
     }
 
+    private static SourceSpecs testJava(final String path, final String query) {
+        return java("""
+                package p;
+                public class FTest {
+                    String query = "%s";
+                }
+                """.formatted(query.replace("\"", "\\\"")), s -> s.path(path));
+    }
+
     @Test
     void reportsFunctionAsDynamicallyInvokedWhenTestStringLiteralMatches() {
         rewriteRun(
-                spec -> expect(spec, row("environment-variable", true, "src/test/java/p/FTest.java")),
+                spec -> expect(spec, row("system-property", true, "src/test/java/p/FTest.java")),
                 with(
-                        signatureFor("environment-variable"),
-                        java(
-                                """
-                                package p;
-                                public class FTest {
-                                    void test() {
-                                        String query = "fn:environment-variable('PATH')";
-                                    }
-                                }
-                                """,
-                                s -> s.path("src/test/java/p/FTest.java")
-                        )
+                        utilFunction("system-property"),
+                        testJava("src/test/java/p/FTest.java", "util:system-property('vendor')")
                 )
         );
     }
@@ -141,32 +173,26 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
     @Test
     void reportsFunctionAsNotDynamicallyInvokedWhenNoTestMatches() {
         rewriteRun(
-                spec -> expect(spec, row("environment-variable", false, "")),
+                spec -> expect(spec, row("system-property", false, "")),
                 with(
-                        signatureFor("environment-variable"),
-                        java(
-                                """
-                                package p;
-                                public class FTest {
-                                    void test() {
-                                        String query = "util:system-property('vendor')";
-                                    }
-                                }
-                                """,
-                                s -> s.path("src/test/java/p/FTest.java")
-                        )
+                        utilFunction("system-property"),
+                        testJava("src/test/java/p/FTest.java", "util:available-system-properties()")
                 )
         );
     }
 
     @Test
-    void findsInvocationInPlainTextXqSuiteModule() {
+    void findsInvocationInXqSuiteModule() {
         rewriteRun(
                 spec -> expect(spec, row("system-property", true, "src/test/xquery/system-property-test.xql")),
                 with(
-                        signatureFor("system-property"),
+                        utilFunction("system-property"),
                         text(
-                                "(: %test:assertTrue :)\ndeclare function local:t() { util:system-property('vendor') };",
+                                """
+                                module namespace t = "http://exist-db.org/xquery/test/system-property";
+                                declare namespace test = "http://exist-db.org/xquery/xqsuite";
+                                declare %test:assertTrue function t:vendor() { util:system-property('vendor') };
+                                """,
                                 s -> s.path("src/test/xquery/system-property-test.xql")
                         )
                 )
@@ -174,24 +200,120 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
     }
 
     @Test
-    void findsInvocationInXmlTestFixture() {
+    void skipsPendingXqSuiteTests() {
         rewriteRun(
-                spec -> expect(spec, row("foo-bar", true, "src/test/resources/t.xml")),
+                spec -> expect(spec, row("system-property", false, "")),
                 with(
-                        signatureFor("foo-bar"),
-                        xml("<test><code>x:foo-bar(1)</code></test>", s -> s.path("src/test/resources/t.xml"))
+                        utilFunction("system-property"),
+                        text(
+                                """
+                                module namespace t = "http://exist-db.org/xquery/test/system-property";
+                                declare namespace test = "http://exist-db.org/xquery/xqsuite";
+                                declare
+                                    %test:pending("broken")
+                                    %test:assertTrue
+                                function t:vendor() { util:system-property('vendor') };
+                                declare variable $t:x := 1;
+                                """,
+                                s -> s.path("src/test/xquery/t.xql")
+                        )
                 )
         );
     }
 
     @Test
-    void findsLocalNameRegisteredViaFunctionSignatureHelperWithConstant() {
+    void findsInvocationInXmlTestSetCodeOnly() {
+        rewriteRun(
+                spec -> expect(spec, row("foo-bar", true, "src/test/xquery/run.xml")),
+                with(
+                        utilFunction("foo-bar"),
+                        xml(
+                                """
+                                <TestSet>
+                                    <testName>t</testName>
+                                    <description>covers util:foo-bar() eventually</description>
+                                    <test>
+                                        <task>util:foo-bar()</task>
+                                        <code><![CDATA[util:foo-bar(1) < 2]]></code>
+                                        <expected>true</expected>
+                                    </test>
+                                </TestSet>
+                                """,
+                                s -> s.path("src/test/xquery/run.xml")
+                        )
+                )
+        );
+    }
+
+    @Test
+    void ignoresXmlTestSetDescriptionsExpectationsAndIgnoredTests() {
+        rewriteRun(
+                spec -> expect(spec, row("foo-bar", false, "")),
+                with(
+                        utilFunction("foo-bar"),
+                        xml(
+                                """
+                                <TestSet>
+                                    <testName>t</testName>
+                                    <description>covers util:foo-bar() eventually</description>
+                                    <test ignore="yes">
+                                        <task>t</task>
+                                        <code>util:foo-bar(1)</code>
+                                    </test>
+                                    <test>
+                                        <task>util:foo-bar()</task>
+                                        <code>1</code>
+                                        <expected>util:foo-bar(1)</expected>
+                                    </test>
+                                </TestSet>
+                                """,
+                                s -> s.path("src/test/xquery/ignored.xml")
+                        ),
+                        xml("<data><q>util:foo-bar(1)</q></data>", s -> s.path("src/test/resources/data.xml"))
+                )
+        );
+    }
+
+    @Test
+    void findsInvocationInXmlTestSetPrologAndXPath() {
+        rewriteRun(
+                spec -> spec.dataTable(XQueryDynamicInvocationCoverageTable.Row.class, rows ->
+                        assertThat(rows).extracting(XQueryDynamicInvocationCoverageTable.Row::isDynamicallyInvokedInTests)
+                                .containsExactly(true, true)),
+                with(
+                        function("""
+                                static final FunctionSignature[] signatures = {
+                                    new FunctionSignature(new QName("in-functions", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "desc"),
+                                    new FunctionSignature(new QName("in-xpath", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "desc")
+                                };
+                                """),
+                        xml(
+                                """
+                                <TestSet>
+                                    <testName>t</testName>
+                                    <functions>declare function local:f() { util:in-functions() };</functions>
+                                    <test>
+                                        <task>t</task>
+                                        <code>local:f()</code>
+                                        <xpath>util:in-xpath(.)</xpath>
+                                    </test>
+                                </TestSet>
+                                """,
+                                s -> s.path("src/test/xquery/prolog.xml")
+                        )
+                )
+        );
+    }
+
+    @Test
+    void resolvesNamespaceThroughModuleSignatureHelper() {
         rewriteRun(
                 spec -> spec.dataTable(XQueryDynamicInvocationCoverageTable.Row.class, rows ->
                         assertThat(rows).containsExactly(
                                 new XQueryDynamicInvocationCoverageTable.Row(
                                         "org/exist/xquery/functions/util/AvailableSystemProperties.java",
                                         "org.exist.xquery.functions.util.AvailableSystemProperties",
+                                        UTIL_NS,
                                         "available-system-properties",
                                         true,
                                         "src/test/java/org/exist/xquery/functions/util/SystemPropertyTest.java"
@@ -202,35 +324,153 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                         java(
                                 """
                                 package org.exist.xquery.functions.util;
-                                public class UtilModule {
-                                    static Object functionSignature(String name, String description, Object returnType, Object... paramTypes) {
-                                        return null;
-                                    }
-                                }
-                                """
-                        ),
-                        java(
-                                """
-                                package org.exist.xquery.functions.util;
                                 import org.exist.xquery.BasicFunction;
+                                import org.exist.xquery.FunctionSignature;
                                 import static org.exist.xquery.functions.util.UtilModule.functionSignature;
                                 public class AvailableSystemProperties extends BasicFunction {
                                     private final static String FS_NAME = "available-system-properties";
-                                    public static final Object SIGNATURE = functionSignature(FS_NAME, "desc", null);
+                                    public static final FunctionSignature SIGNATURE = functionSignature(FS_NAME, "desc");
+                                }
+                                """
+                        ),
+                        testJava("src/test/java/org/exist/xquery/functions/util/SystemPropertyTest.java",
+                                "util:available-system-properties()")
+                )
+        );
+    }
+
+    @Test
+    void distinguishesFunctionsSharingALocalNameByNamespace() {
+        rewriteRun(
+                spec -> spec.dataTable(XQueryDynamicInvocationCoverageTable.Row.class, rows ->
+                        assertThat(rows)
+                                .extracting(XQueryDynamicInvocationCoverageTable.Row::getNamespaceUri,
+                                        XQueryDynamicInvocationCoverageTable.Row::isDynamicallyInvokedInTests)
+                                .containsExactly(Tuple.tuple(FN_NS, true), Tuple.tuple(NGRAM_NS, false))),
+                with(
+                        java(
+                                """
+                                package p;
+                                import org.exist.xquery.Function;
+                                import org.exist.xquery.FunctionSignature;
+                                import org.exist.dom.QName;
+                                public class FunContains extends Function {
+                                    static final FunctionSignature S = new FunctionSignature(new QName("contains", Function.BUILTIN_FUNCTION_NS), "");
                                 }
                                 """
                         ),
                         java(
                                 """
-                                package org.exist.xquery.functions.util;
-                                public class SystemPropertyTest {
-                                    void test() {
-                                        String query = "util:available-system-properties()";
-                                    }
+                                package p;
+                                import org.exist.xquery.BasicFunction;
+                                import org.exist.xquery.FunctionSignature;
+                                import org.exist.dom.QName;
+                                public class NGramSearch extends BasicFunction {
+                                    static final FunctionSignature S = new FunctionSignature(new QName("contains", "http://exist-db.org/xquery/ngram", "ngram"), "");
                                 }
-                                """,
-                                s -> s.path("src/test/java/org/exist/xquery/functions/util/SystemPropertyTest.java")
-                        )
+                                """
+                        ),
+                        text("contains('abc', 'b'), fn:contains('a', 'a')", s -> s.path("src/test/xquery/t.xql"))
+                )
+        );
+    }
+
+    @Test
+    void resolvesPrefixesDeclaredInTheTest() {
+        rewriteRun(
+                spec -> expect(spec, row("foo-bar", true, "src/test/xquery/t.xql")),
+                with(
+                        utilFunction("foo-bar"),
+                        text("""
+                                declare namespace u = "http://exist-db.org/xquery/util";
+                                u:foo-bar(1)
+                                """, s -> s.path("src/test/xquery/t.xql"))
+                )
+        );
+    }
+
+    @Test
+    void doesNotMatchModuleDefaultPrefixRedeclaredToAnotherNamespace() {
+        rewriteRun(
+                spec -> expect(spec, row("foo-bar", false, "")),
+                with(
+                        utilFunction("foo-bar"),
+                        text("""
+                                declare namespace util = "http://example.com/not-util";
+                                util:foo-bar(1)
+                                """, s -> s.path("src/test/xquery/t.xql"))
+                )
+        );
+    }
+
+    @Test
+    void countsTestRunnerLibrariesAsExecutedByTests() {
+        rewriteRun(
+                spec -> expect(spec, row("eval", true,
+                        "exist-core/src/main/resources/org/exist/xquery/lib/xqsuite/xqsuite.xql")),
+                with(
+                        utilFunction("eval"),
+                        text("util:eval($code)",
+                                s -> s.path("exist-core/src/main/resources/org/exist/xquery/lib/xqsuite/xqsuite.xql"))
+                )
+        );
+    }
+
+    @Test
+    void findsInvocationsInBatsTestsAndRestQueryBodies() {
+        rewriteRun(
+                spec -> spec.dataTable(XQueryDynamicInvocationCoverageTable.Row.class, rows ->
+                        assertThat(rows).extracting(XQueryDynamicInvocationCoverageTable.Row::getMatchingTestPaths)
+                                .containsExactly("exist-docker/src/test/bats/03-xquery-spec.bats",
+                                        "exist-docker/src/test/bats/fixtures/q.xml")),
+                with(
+                        function("""
+                                static final FunctionSignature[] signatures = {
+                                    new FunctionSignature(new QName("in-bats", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "desc"),
+                                    new FunctionSignature(new QName("in-rest-query", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "desc")
+                                };
+                                """),
+                        text("""
+                                @test "query" {
+                                  run curl -s "http://127.0.0.1:8080/exist/rest/db?_query=util:in-bats()&_wrap=no"
+                                }
+                                """, s -> s.path("exist-docker/src/test/bats/03-xquery-spec.bats")),
+                        xml("""
+                                <query xmlns="http://exist.sourceforge.net/NS/exist" wrap="no">
+                                    <text><![CDATA[ util:in-rest-query("admin") ]]></text>
+                                </query>
+                                """, s -> s.path("exist-docker/src/test/bats/fixtures/q.xml"))
+                )
+        );
+    }
+
+    @Test
+    void resolvesLocalPartOfQNameConstant() {
+        rewriteRun(
+                spec -> expect(spec, row("resource-functions", false, "")),
+                with(
+                        function("""
+                                private final static QName RESOURCE_FUNCTIONS = new QName("resource-functions", UtilModule.NAMESPACE_URI, UtilModule.PREFIX);
+                                static final FunctionSignature S = new FunctionSignature(
+                                        new QName(RESOURCE_FUNCTIONS.getLocalPart(), UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "");
+                                """)
+                )
+        );
+    }
+
+    @Test
+    void fallsBackToLocalNameWhenNamespaceIsUnresolved() {
+        rewriteRun(
+                spec -> spec.dataTable(XQueryDynamicInvocationCoverageTable.Row.class, rows ->
+                        assertThat(rows).containsExactly(
+                                new XQueryDynamicInvocationCoverageTable.Row("p/F.java", "p.F", "", "mystery",
+                                        true, "src/test/xquery/t.xql"))),
+                with(
+                        function("""
+                                static String ns() { return "urn:computed"; }
+                                static final FunctionSignature S = new FunctionSignature(new QName("mystery", ns()), "");
+                                """),
+                        text("x:mystery()", s -> s.path("src/test/xquery/t.xql"))
                 )
         );
     }
@@ -240,24 +480,25 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
         rewriteRun(
                 spec -> expect(spec, row("name", false, "")),
                 with(
-                        signatureFor("name"),
-                        text("fn:local-name(.), fn:node-name(.)", s -> s.path("src/test/xquery/t.xql"))
+                        utilFunction("name"),
+                        text("util:local-name(.), util:node-name(.)", s -> s.path("src/test/xquery/t.xql"))
                 )
         );
     }
 
     @Test
-    void ignoresXQueryOutsideTestSourceSets() {
+    void ignoresCodeOutsideTestSourceSetsAndNonXQueryTestFiles() {
         rewriteRun(
                 spec -> expect(spec, row("foo-bar", false, "")),
                 with(
-                        signatureFor("foo-bar"),
-                        text("x:foo-bar(1)", s -> s.path("src/main/resources/app/lib.xqm")),
+                        utilFunction("foo-bar"),
+                        text("util:foo-bar(1)", s -> s.path("src/main/resources/app/lib.xqm")),
+                        text("util:foo-bar(1)", s -> s.path("src/test/resources/expected.txt")),
                         java(
                                 """
                                 package org.exist.test;
                                 public class Helper {
-                                    String q = "x:foo-bar(1)";
+                                    String q = "util:foo-bar(1)";
                                 }
                                 """,
                                 s -> s.path("src/main/java/org/exist/test/Helper.java")
@@ -271,8 +512,8 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
         rewriteRun(
                 spec -> expect(spec, row("foo-bar", true, "test/src/t.xql")),
                 with(
-                        signatureFor("foo-bar"),
-                        text("x:foo-bar(1)", s -> s.path("test/src/t.xql"))
+                        utilFunction("foo-bar"),
+                        text("util:foo-bar(1)", s -> s.path("test/src/t.xql"))
                 )
         );
     }
@@ -283,7 +524,7 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                 spec -> expect(spec, row("late-name", false, "")),
                 with(
                         function("""
-                                public static final FunctionSignature signature = new FunctionSignature(new QName(FS_NAME, "ns"), "desc");
+                                public static final FunctionSignature signature = new FunctionSignature(new QName(FS_NAME, UtilModule.NAMESPACE_URI), "desc");
                                 private static final String FS_NAME = "late-name";
                                 """)
                 )
@@ -299,9 +540,10 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                                 """
                                 package p;
                                 import org.exist.dom.QName;
+                                import org.exist.xquery.functions.util.UtilModule;
                                 public class Names {
                                     public static final String LOCAL = "shared-name";
-                                    public static final QName QN = new QName(LOCAL, "ns");
+                                    public static final QName QN = new QName(LOCAL, UtilModule.NAMESPACE_URI, UtilModule.PREFIX);
                                 }
                                 """
                         ),
@@ -316,7 +558,7 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                 spec -> expect(spec, row("real-fn", false, "")),
                 with(
                         function("""
-                                public static final FunctionSignature signature = new FunctionSignature(new QName("real-fn", "ns"), "desc");
+                                public static final FunctionSignature signature = new FunctionSignature(new QName("real-fn", UtilModule.NAMESPACE_URI), "desc");
                                 private static final QName RESULT = new QName("result", "");
                                 Object eval() { return new QName("value", ""); }
                                 """)
@@ -331,9 +573,7 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                         assertThat(rows)
                                 .extracting(XQueryDynamicInvocationCoverageTable.Row::getClassName,
                                         XQueryDynamicInvocationCoverageTable.Row::getLocalName)
-                                .containsExactly(
-                                        org.assertj.core.groups.Tuple.tuple("p.M$A", "aa"),
-                                        org.assertj.core.groups.Tuple.tuple("p.M$B", "bb"))),
+                                .containsExactly(Tuple.tuple("p.M$A", "aa"), Tuple.tuple("p.M$B", "bb"))),
                 with(
                         java(
                                 """
@@ -343,10 +583,10 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                                 import org.exist.dom.QName;
                                 public class M {
                                     static class A extends BasicFunction {
-                                        static final FunctionSignature S = new FunctionSignature(new QName("aa", ""), "");
+                                        static final FunctionSignature S = new FunctionSignature(new QName("aa", "urn:x"), "");
                                     }
                                     static class B extends BasicFunction {
-                                        static final FunctionSignature S = new FunctionSignature(new QName("bb", ""), "");
+                                        static final FunctionSignature S = new FunctionSignature(new QName("bb", "urn:x"), "");
                                     }
                                 }
                                 """
@@ -369,7 +609,7 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                                 import org.exist.xquery.FunctionSignature;
                                 import org.exist.dom.QName;
                                 public class FunCount extends Function {
-                                    static final FunctionSignature S = new FunctionSignature(new QName("count", "ns"), "");
+                                    static final FunctionSignature S = new FunctionSignature(new QName("count", Function.BUILTIN_FUNCTION_NS), "");
                                 }
                                 """
                         ),
@@ -380,7 +620,7 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                                 import org.exist.xquery.FunctionSignature;
                                 import org.exist.dom.QName;
                                 public class MyUdf extends UserDefinedFunction {
-                                    static final FunctionSignature S = new FunctionSignature(new QName("udf", "ns"), "");
+                                    static final FunctionSignature S = new FunctionSignature(new QName("udf", "urn:x"), "");
                                 }
                                 """
                         )
@@ -397,29 +637,30 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                 with(
                         function("""
                                 static final FunctionSignature[] signatures = {
-                                    new FunctionSignature(new QName("spaced", "ns"), "desc"),
-                                    new FunctionSignature(new QName("referenced", "ns"), "desc"),
-                                    new FunctionSignature(new QName("looked-up", "ns"), "desc")
+                                    new FunctionSignature(new QName("spaced", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "desc"),
+                                    new FunctionSignature(new QName("referenced", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "desc"),
+                                    new FunctionSignature(new QName("looked-up", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "desc")
                                 };
                                 """),
                         text("""
-                                x:spaced ( 1 ),
-                                for-each((1, 2), x:referenced#1),
-                                function-lookup(xs:QName('x:looked-up'), 0)
+                                util:spaced ( 1 ),
+                                for-each((1, 2), util:referenced#1),
+                                function-lookup(xs:QName('util:looked-up'), 0)
                                 """, s -> s.path("src/test/xquery/t.xql"))
                 )
         );
     }
 
     @Test
-    void ignoresCommentsAndFunctionDeclarations() {
+    void ignoresCommentsAnnotationsAndFunctionDeclarations() {
         rewriteRun(
                 spec -> expect(spec, row("count", false, "")),
                 with(
-                        signatureFor("count"),
+                        utilFunction("count"),
                         text("""
-                                (: TODO test fn:count() (: nested :) :)
-                                declare function local:count($x) { 1 };
+                                module namespace util = "http://exist-db.org/xquery/util";
+                                (: TODO test util:count() (: nested :) :)
+                                declare %util:count("x") function util:count($x) { 1 };
                                 """, s -> s.path("src/test/xquery/t.xql"))
                 )
         );
@@ -430,25 +671,17 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
         rewriteRun(
                 spec -> expect(spec, row("split-name", true, "src/test/java/p/FTest.java")),
                 with(
-                        signatureFor("split-name"),
+                        utilFunction("split-name"),
                         java(
                                 """
                                 package p;
                                 public class FTest {
-                                    String q = "x:split-" + "name" + "(1)";
+                                    String q = "util:split-" + "name" + "(1)";
                                 }
                                 """,
                                 s -> s.path("src/test/java/p/FTest.java")
                         )
                 )
         );
-    }
-
-    @Test
-    void stripXQueryCommentsLeavesUnterminatedCommentInPlace() {
-        assertThat(XQueryDynamicInvocationCoverage.stripXQueryComments("a (: b (: c :) d :) e"))
-                .isEqualTo("a   e");
-        assertThat(XQueryDynamicInvocationCoverage.stripXQueryComments("a (: b"))
-                .isEqualTo("a (: b");
     }
 }

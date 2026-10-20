@@ -15,30 +15,42 @@ essentially every builtin XQuery function implementation) are dispatched by QNam
 query engine at runtime, not called directly from Java, so a static call-graph analysis can never
 see the edge from a test to `eval()` and always reports it as untested.
 
-For each function class (excluding `UserDefinedFunction`), the recipe takes the local name(s)
-registered by its `FunctionSignature` — the first argument to `new FunctionSignature(...)` or a
-`functionSignature(...)`/`functionSignatures(...)` helper, given inline, as `new QName("...", ...)`,
-or through a `String`/`QName` constant declared anywhere in the codebase. QNames built for other
+For each function class (excluding `UserDefinedFunction`), the recipe takes the QName(s)
+registered by its `FunctionSignature`: the first argument to `new FunctionSignature(...)` or a
+`functionSignature(...)`/`functionSignatures(...)` helper. That argument may be a
+`new QName(local, NAMESPACE_URI, PREFIX)`, a `String`/`QName` constant declared anywhere in the
+codebase, or a bare local name passed to a module helper such as `UtilModule.functionSignature`,
+whose own `new QName(name, NAMESPACE_URI, PREFIX)` supplies the namespace. QNames built for other
 purposes (e.g. result elements inside `eval()`) are ignored.
 
-It then searches every file in a test source set (`src/test*/`, `src/*Test/`, or a top-level
-`test/`/`tests/` directory) — string literals in Java tests (with `"a" + "b"` concatenations
-folded), and the full text of any other test resource: XQSuite modules, XML fixtures, and so on —
-for:
+It then scans the code that eXist-db's test runners actually execute (the `@XQSuite` suites run by
+`XQSuiteTestEngine`):
 
-- calls: `prefix:name(` or `name (` (the name must start at a name boundary, so `fn:local-name(`
-  does not count as a call to `name`),
-- function references: `prefix:name#1`,
-- lookups: `xs:QName('prefix:name')`,
+| Source | What is scanned |
+|---|---|
+| XQuery files (`.xq`, `.xql`, `.xqm`, `.xquery`, `.xqy`, `.xqws`) in test source sets — XQSuite modules | the whole module, minus `%test:pending` functions, which XQSuite never runs |
+| XML `<TestSet>` files in test source sets (run by `XMLTestRunner`/`test.xq`) | each test's `<code>` and `<xpath>`, plus the set's `<imports>`, `<variable>` and `<functions>` prolog; tests with an `@ignore` other than `"no"` are skipped, as are `<task>`, `<description>` and `<expected>`. Other XML files are data fixtures and are ignored |
+| Java test classes | string literals, with `"a" + "b"` concatenations folded |
+| The runner libraries `xqsuite/xqsuite.xql` and `test.xq` | the whole file, since it runs with every suite |
+| BATS container tests (`.bats`) in test source sets, run by the `ci-container` workflow | the whole file |
+| REST API `<query xmlns="http://exist.sourceforge.net/NS/exist">` request bodies in test source sets | the `<text>` |
 
-ignoring XQuery `(: comments :)` and `declare function` declarations. The resulting
-`XQueryDynamicInvocationCoverageTable` data table reports whether each function is actually
-exercised by a test.
+Test source sets are `src/test*/`, `src/*Test/`, or a top-level `test/`/`tests/` directory.
 
-It's a best-effort heuristic (matches on QName local name only, not the full namespace-qualified
-name), so it can be fooled by two different modules sharing a local name. Treat a `false` result
-as a real candidate gap; treat a `true` result as reasonably trustworthy given how specific most
-eXist-db function names are.
+In each, it finds calls (`prefix:name(`, `name (`), function references (`prefix:name#1`) and
+`xs:QName('prefix:name')` lookups, ignoring XQuery `(: comments :)`, annotations and
+`declare function` declarations. A prefix resolves to a namespace through the text's own
+`declare namespace`/`import module namespace`/`module namespace` declarations or, failing that, the
+statically bound prefixes: `fn`, `map`, `array`, `math`, `xs`, and each module's default `PREFIX`.
+An unprefixed call is in the default function namespace (`fn:` unless redeclared). A function then
+matches on **namespace and local name**, so `fn:contains`, `ngram:contains` and `range:contains`
+are told apart; only a function whose namespace could not be resolved falls back to matching on
+its local name alone (its `Namespace URI` column is empty).
+
+The resulting `XQueryDynamicInvocationCoverageTable` data table reports whether each function is
+actually exercised by a test. It's a best-effort heuristic: it does not check arity, and it can't
+tell whether a call it finds is reached at run time. Treat a `false` result as a real candidate gap
+and a `true` result as reasonably trustworthy.
 
 ## Building
 

@@ -51,11 +51,11 @@ dependencies {
     }
 
     implementation("org.openrewrite:rewrite-java")
+    implementation("org.openrewrite:rewrite-xml")
 
     testImplementation("org.openrewrite:rewrite-test") {
         exclude(group = "org.slf4j", module = "slf4j-nop")
     }
-    testImplementation("org.openrewrite:rewrite-xml")
     testImplementation("org.assertj:assertj-core:3.27.7")
     testRuntimeOnly("org.openrewrite:rewrite-java-17")
 }

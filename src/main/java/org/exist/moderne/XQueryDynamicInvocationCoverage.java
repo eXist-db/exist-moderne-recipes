@@ -28,17 +28,17 @@ import org.jspecify.annotations.Nullable;
 import org.openrewrite.Cursor;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.ScanningRecipe;
-import org.openrewrite.SourceFile;
 import org.openrewrite.Tree;
 import org.openrewrite.TreeVisitor;
-import org.openrewrite.binary.Binary;
 import org.openrewrite.java.JavaIsoVisitor;
 import org.openrewrite.java.tree.Expression;
 import org.openrewrite.java.tree.J;
 import org.openrewrite.java.tree.JavaSourceFile;
 import org.openrewrite.java.tree.JavaType;
+import org.openrewrite.java.tree.Statement;
 import org.openrewrite.java.tree.TypeUtils;
-import org.openrewrite.quark.Quark;
+import org.openrewrite.text.PlainText;
+import org.openrewrite.xml.tree.Xml;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -48,8 +48,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Corrects a systematic blind spot in static test-coverage analysis for interpreter/DSL-dispatch
@@ -59,20 +57,33 @@ import java.util.regex.Pattern;
  * engine (a string, parsed and dispatched at runtime), not via a direct Java method call.
  * <p>
  * Scans every non-test Java source file for classes assignable to {@code org.exist.xquery.Function}
- * (excluding {@code UserDefinedFunction}), extracting the QName local name(s) each one registers:
- * the name passed as the first argument to {@code new FunctionSignature(...)} or to a
- * {@code functionSignature(...)}/{@code functionSignatures(...)} helper, whether given inline, as a
- * {@code new QName("...", ...)}, or through a {@code String}/{@code QName} constant declared
- * anywhere in the codebase. Then scans every source file under a test source set — Java test
- * classes (string literal contents) and any other test resource (XQSuite modules, XML fixtures,
- * ...) alike — for XQuery function calls ({@code prefix:name(}), function references
- * ({@code prefix:name#1}) and {@code xs:QName('prefix:name')} lookups, ignoring XQuery comments.
- * Emits one row per (implementing class, local name) pair reporting whether a match was found and
- * where.
+ * (excluding {@code UserDefinedFunction}), extracting the QName(s) each one registers: the first
+ * argument to {@code new FunctionSignature(...)} or to a {@code functionSignature(...)}/
+ * {@code functionSignatures(...)} helper, whether a {@code new QName(local, namespace, prefix)}, a
+ * {@code String}/{@code QName} constant declared anywhere in the codebase, or a bare local name
+ * passed to a module's helper, whose own {@code new QName(name, NAMESPACE_URI, PREFIX)} supplies the
+ * namespace.
  * <p>
- * This is a best-effort heuristic, not a proof: it matches on local name only (not the full
- * qualified QName with namespace prefix), so it can be fooled by two different modules
- * coincidentally sharing a local name.
+ * Then scans the code the test suites actually execute, as eXist-db's runners do:
+ * <ul>
+ * <li>XQuery files in test source sets (XQSuite modules), skipping {@code %test:pending} functions;</li>
+ * <li>XML {@code <TestSet>} files in test source sets, taking only the {@code <code>} and
+ * {@code <xpath>} of tests that are not {@code @ignore}d, and the set's {@code <imports>},
+ * {@code <functions>} and {@code <variable>} prolog;</li>
+ * <li>string literals in Java test classes;</li>
+ * <li>BATS integration tests ({@code .bats}) and REST API {@code <query>} request bodies, which run
+ * queries against a container;</li>
+ * <li>the XQSuite and XML test runner libraries themselves, which run with every suite.</li>
+ * </ul>
+ * In each, it finds function calls ({@code prefix:name(}), function references
+ * ({@code prefix:name#1}) and {@code xs:QName('prefix:name')} lookups, ignoring XQuery comments,
+ * and resolves their prefixes to a namespace from the text's own declarations or, failing that, the
+ * modules' default prefixes. A function is matched on namespace and local name, or on local name
+ * alone if its namespace could not be resolved. Emits one row per (implementing class, QName) pair
+ * reporting whether a match was found and where.
+ * <p>
+ * This is a best-effort heuristic, not a proof: it does not check arity, and it cannot tell
+ * whether a call it finds is actually reached when the test runs.
  */
 @Value
 @EqualsAndHashCode(callSuper = false)
@@ -83,21 +94,16 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
     private static final String USER_DEFINED_FUNCTION = "org.exist.xquery.UserDefinedFunction";
     private static final String FUNCTION_SIGNATURE = "org.exist.xquery.FunctionSignature";
     private static final String QNAME = "org.exist.dom.QName";
+    private static final String EXIST_NS = "http://exist.sourceforge.net/NS/exist";
 
-    private static final String NAME_START = "[\\p{L}_]";
-    private static final String NAME_CHAR = "[\\p{L}\\p{N}_.\\-\\p{M}]";
-    private static final String NCNAME = NAME_START + NAME_CHAR + "*";
+    /** File extensions eXist-db's {@code XQueryFilenameFilter} treats as XQuery. */
+    private static final String[] XQUERY_EXTENSIONS = {".xq", ".xql", ".xqm", ".xquery", ".xqy", ".xqws"};
 
-    // A function call `name(` or function reference `name#1`, optionally prefixed. The lookbehind
-    // stops a match starting mid-name (so `local-name(` never yields `name`) or on a variable
-    // (`$f(`); group 1 flags a function declaration (`declare function local:count(`), which is
-    // not an invocation.
-    private static final Pattern INVOCATION = Pattern.compile(
-            "(?<![\\p{L}\\p{N}_.\\-:$])(function\\s+)?(?:" + NCNAME + ":)?(" + NCNAME + ")\\s*(?:\\(|#\\d)");
-
-    // `xs:QName('prefix:name')`, as used with `function-lookup(...)`.
-    private static final Pattern QNAME_LOOKUP = Pattern.compile(
-            "QName\\(\\s*[\"'](?:" + NCNAME + ":)?(" + NCNAME + ")[\"']");
+    /** The test runner libraries, under {@code src/main}, executed by every XQSuite or XML test file. */
+    private static final String[] TEST_RUNNER_LIBRARIES = {
+            "org/exist/xquery/lib/xqsuite/xqsuite.xql",
+            "org/exist/xquery/lib/test.xq"
+    };
 
     @Getter
     final String displayName = "XQuery dynamic-invocation test coverage";
@@ -122,15 +128,27 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
                     final JavaSourceFile cu = (JavaSourceFile) tree;
                     final String path = cu.getSourcePath().toString();
                     if (isTestPath(path)) {
-                        indexInvocations(acc, path, String.join("\n", collectStringLiterals(cu, ctx)));
+                        acc.index(path, XQueryCalls.invocations(String.join("\n", collectStringLiterals(cu, ctx)), true));
                     } else {
-                        collectFunctionNames(cu, ctx, acc, path);
+                        collectFunctionNames(cu, ctx, acc);
                     }
-                } else if (tree instanceof SourceFile && !(tree instanceof Quark) && !(tree instanceof Binary)) {
-                    final SourceFile sf = (SourceFile) tree;
-                    final String path = sf.getSourcePath().toString();
+                } else if (tree instanceof PlainText) {
+                    final PlainText pt = (PlainText) tree;
+                    final String path = pt.getSourcePath().toString();
+                    if (isXQueryFile(path) && (isTestPath(path) || isTestRunnerLibrary(path))) {
+                        acc.index(path, XQueryCalls.invocations(pt.getText(), true));
+                    } else if (path.endsWith(".bats") && isTestPath(path)) {
+                        // BATS integration tests run queries against a container via the client or REST API.
+                        acc.index(path, XQueryCalls.invocations(pt.getText(), false));
+                    }
+                } else if (tree instanceof Xml.Document) {
+                    final Xml.Document doc = (Xml.Document) tree;
+                    final String path = doc.getSourcePath().toString();
                     if (isTestPath(path)) {
-                        indexInvocations(acc, path, sf.printAll());
+                        final String code = executedCode(doc);
+                        if (code != null) {
+                            acc.index(path, XQueryCalls.invocations(code, false));
+                        }
                     }
                 }
                 return tree;
@@ -149,13 +167,13 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
                     final Map<String, ClassInfo> classes = acc.implementationsByPath.get(path);
                     if (classes != null) {
                         for (final ClassInfo info : classes.values()) {
-                            for (final String localName : info.resolveLocalNames(acc.constants)) {
-                                final Set<String> matches = acc.testPathsByLocalName
-                                        .getOrDefault(localName, Collections.emptySet());
+                            for (final ResolvedName name : acc.resolveNames(info)) {
+                                final Set<String> matches = acc.matchingTestPaths(name);
                                 table.insertRow(ctx, new XQueryDynamicInvocationCoverageTable.Row(
                                         path,
                                         info.className,
-                                        localName,
+                                        name.namespaceUri != null ? name.namespaceUri : "",
+                                        name.localName,
                                         !matches.isEmpty(),
                                         String.join("; ", matches)
                                 ));
@@ -189,64 +207,127 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
         return false;
     }
 
-    private static void indexInvocations(final Acc acc, final String path, final String text) {
-        final String code = stripXQueryComments(text);
-        final Matcher invocation = INVOCATION.matcher(code);
-        while (invocation.find()) {
-            if (invocation.group(1) == null) {
-                acc.testPathsByLocalName.computeIfAbsent(invocation.group(2), n -> new LinkedHashSet<>()).add(path);
+    private static boolean isXQueryFile(final String path) {
+        for (final String extension : XQUERY_EXTENSIONS) {
+            if (path.endsWith(extension)) {
+                return true;
             }
         }
-        final Matcher lookup = QNAME_LOOKUP.matcher(code);
-        while (lookup.find()) {
-            acc.testPathsByLocalName.computeIfAbsent(lookup.group(1), n -> new LinkedHashSet<>()).add(path);
+        return false;
+    }
+
+    private static boolean isTestRunnerLibrary(final String path) {
+        final String normalized = path.replace('\\', '/');
+        for (final String library : TEST_RUNNER_LIBRARIES) {
+            if (normalized.endsWith("/" + library)) {
+                return true;
+            }
         }
+        return false;
     }
 
     /**
-     * Removes (possibly nested) XQuery {@code (: ... :)} comments. An unterminated comment is left
-     * in place rather than swallowing the rest of the text.
+     * @return the XQuery a test XML document executes: a {@code <TestSet>}'s tests, or the
+     *         {@code <text>} of a REST API {@code <query>} request body; null for any other
+     *         document, which is test data rather than code
      */
-    static String stripXQueryComments(final String text) {
-        if (!text.contains("(:")) {
-            return text;
-        }
-        final StringBuilder out = new StringBuilder(text.length());
-        int i = 0;
-        while (i < text.length()) {
-            if (text.startsWith("(:", i)) {
-                final int end = commentEnd(text, i);
-                if (end < 0) {
-                    out.append(text, i, text.length());
-                    break;
+    static @Nullable String executedCode(final Xml.Document doc) {
+        final Xml.Tag root = doc.getRoot();
+        if (root != null && "query".equals(localName(root)) && declaresExistNamespace(root)) {
+            final StringBuilder code = new StringBuilder();
+            for (final Xml.Tag child : root.getChildren()) {
+                if ("text".equals(localName(child))) {
+                    code.append(textContent(child)).append('\n');
                 }
-                out.append(' ');
-                i = end;
-            } else {
-                out.append(text.charAt(i++));
             }
+            return code.toString();
         }
-        return out.toString();
+        return testSetCode(doc);
     }
 
-    private static int commentEnd(final String text, final int start) {
-        int depth = 0;
-        int i = start;
-        while (i < text.length() - 1) {
-            if (text.startsWith("(:", i)) {
-                depth++;
-                i += 2;
-            } else if (text.startsWith(":)", i)) {
-                depth--;
-                i += 2;
-                if (depth == 0) {
-                    return i;
-                }
-            } else {
-                i++;
+    /**
+     * Extracts the XQuery an XML {@code <TestSet>} executes, mirroring eXist-db's {@code test.xq}:
+     * each test's {@code <code>} (and {@code <xpath>} assertions) is run with the set's
+     * {@code <imports>}, {@code <variable>}s and {@code <functions>} as its prolog, skipping tests
+     * whose {@code @ignore} is anything but {@code "no"}. Other children ({@code <description>},
+     * {@code <task>}, {@code <expected>}, ...) are not code and are left out.
+     *
+     * @return the code, or null if the document is not a {@code <TestSet>}
+     */
+    static @Nullable String testSetCode(final Xml.Document doc) {
+        final Xml.Tag root = doc.getRoot();
+        if (root == null || !"TestSet".equals(root.getName())) {
+            return null;
+        }
+        final StringBuilder code = new StringBuilder();
+        for (final Xml.Tag child : root.getChildren()) {
+            switch (child.getName()) {
+                case "imports":
+                case "functions":
+                case "variable":
+                    code.append(textContent(child)).append('\n');
+                    break;
+                case "test":
+                    final String ignore = attribute(child, "ignore");
+                    if (ignore == null || "no".equals(ignore)) {
+                        for (final Xml.Tag part : child.getChildren()) {
+                            if ("code".equals(part.getName()) || "xpath".equals(part.getName())) {
+                                code.append(textContent(part)).append('\n');
+                            }
+                        }
+                    }
+                    break;
+                default:
+                    break;
             }
         }
-        return -1;
+        return code.toString();
+    }
+
+    private static String localName(final Xml.Tag tag) {
+        final String name = tag.getName();
+        return name.substring(name.indexOf(':') + 1);
+    }
+
+    private static boolean declaresExistNamespace(final Xml.Tag tag) {
+        for (final Xml.Attribute attribute : tag.getAttributes()) {
+            if (attribute.getKeyAsString().startsWith("xmlns") && EXIST_NS.equals(attribute.getValueAsString())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static @Nullable String attribute(final Xml.Tag tag, final String name) {
+        for (final Xml.Attribute attribute : tag.getAttributes()) {
+            if (name.equals(attribute.getKeyAsString())) {
+                return attribute.getValueAsString();
+            }
+        }
+        return null;
+    }
+
+    private static String textContent(final Xml.Tag tag) {
+        final StringBuilder text = new StringBuilder();
+        if (tag.getContent() != null) {
+            for (final Object content : tag.getContent()) {
+                if (content instanceof Xml.CharData) {
+                    final Xml.CharData charData = (Xml.CharData) content;
+                    text.append(charData.isCdata() ? charData.getText() : unescape(charData.getText()));
+                } else if (content instanceof Xml.Tag) {
+                    text.append(textContent((Xml.Tag) content));
+                }
+            }
+        }
+        return text.toString();
+    }
+
+    private static String unescape(final String text) {
+        if (text.indexOf('&') < 0) {
+            return text;
+        }
+        return text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
+                .replace("&apos;", "'").replace("&amp;", "&");
     }
 
     private static List<String> collectStringLiterals(final JavaSourceFile cu, final ExecutionContext ctx) {
@@ -291,8 +372,8 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
         return null;
     }
 
-    private static void collectFunctionNames(final JavaSourceFile cu, final ExecutionContext ctx,
-            final Acc acc, final String path) {
+    private static void collectFunctionNames(final JavaSourceFile cu, final ExecutionContext ctx, final Acc acc) {
+        final String path = cu.getSourcePath().toString();
         new JavaIsoVisitor<ExecutionContext>() {
             final List<String> classStack = new ArrayList<>();
             final List<@Nullable String> functionClassStack = new ArrayList<>();
@@ -323,9 +404,9 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
                         && block.getParentTreeCursor().getValue() instanceof J.ClassDeclaration;
                 final Expression initializer = result.getInitializer();
                 if (isField && initializer != null && !classStack.isEmpty()) {
-                    final NameRef ref = nameRef(initializer);
+                    final Ref ref = ref(initializer);
                     if (ref != null) {
-                        acc.constants.put(constantKey(classStack.get(classStack.size() - 1), result.getSimpleName()), ref);
+                        acc.constants.put(memberKey(currentClass(), result.getSimpleName()), ref);
                     }
                 }
                 return result;
@@ -335,7 +416,9 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
             public J.NewClass visitNewClass(final J.NewClass newClass, final ExecutionContext c) {
                 final J.NewClass result = super.visitNewClass(newClass, c);
                 if (TypeUtils.isOfClassType(result.getType(), FUNCTION_SIGNATURE)) {
-                    recordFirstArg(result.getArguments());
+                    recordFirstArg(result.getArguments(), null);
+                } else if (TypeUtils.isOfClassType(result.getType(), QNAME)) {
+                    recordSignatureHelper(result);
                 }
                 return result;
             }
@@ -344,30 +427,62 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
             public J.MethodInvocation visitMethodInvocation(final J.MethodInvocation method,
                     final ExecutionContext c) {
                 final J.MethodInvocation result = super.visitMethodInvocation(method, c);
-                final String name = result.getSimpleName();
-                if ("functionSignature".equals(name) || "functionSignatures".equals(name)) {
-                    recordFirstArg(result.getArguments());
+                if (isSignatureHelperName(result.getSimpleName())) {
+                    final JavaType.Method type = result.getMethodType();
+                    recordFirstArg(result.getArguments(), type != null
+                            ? memberKey(type.getDeclaringType().getFullyQualifiedName(), result.getSimpleName())
+                            : null);
                 }
                 return result;
             }
 
-            private void recordFirstArg(final List<Expression> args) {
+            /**
+             * Records a module's {@code functionSignature(String name, ...)} helper, e.g.
+             * {@code return FunctionDSL.functionSignature(new QName(name, NAMESPACE_URI, PREFIX), ...)},
+             * so that a function registering itself through it with a bare local name gets the
+             * helper's namespace.
+             */
+            private void recordSignatureHelper(final J.NewClass qname) {
+                final List<Expression> args = qname.getArguments();
+                if (args.size() < 2 || !(args.get(0) instanceof J.Identifier) || classStack.isEmpty()) {
+                    return;
+                }
+                final J.MethodDeclaration method = getCursor().firstEnclosing(J.MethodDeclaration.class);
+                if (method == null || !isSignatureHelperName(method.getSimpleName())
+                        || method.getParameters().isEmpty()) {
+                    return;
+                }
+                final Statement firstParam = method.getParameters().get(0);
+                if (firstParam instanceof J.VariableDeclarations
+                        && !((J.VariableDeclarations) firstParam).getVariables().isEmpty()
+                        && ((J.VariableDeclarations) firstParam).getVariables().get(0).getSimpleName()
+                                .equals(((J.Identifier) args.get(0)).getSimpleName())) {
+                    acc.signatureHelpers.put(memberKey(currentClass(), method.getSimpleName()),
+                            new QNameRef(new Literal(""), ref(args.get(1)), args.size() > 2 ? ref(args.get(2)) : null));
+                }
+            }
+
+            private void recordFirstArg(final List<Expression> args, final @Nullable String helperKey) {
                 final String className = currentFunctionClass();
                 if (className == null || args.isEmpty()) {
                     return;
                 }
-                final NameRef ref = nameRef(args.get(0));
+                final Ref ref = ref(args.get(0));
                 if (ref != null) {
                     acc.implementationsByPath
                             .computeIfAbsent(path, p -> new LinkedHashMap<>())
                             .computeIfAbsent(className, ClassInfo::new)
-                            .names.add(ref);
+                            .names.add(new SignatureName(ref, helperKey));
                 }
             }
 
+            private String currentClass() {
+                return classStack.get(classStack.size() - 1);
+            }
+
             private @Nullable String currentFunctionClass() {
-                // The innermost enclosing class decides attribution; a non-function class nested in
-                // a function class (e.g. a helper) still attributes to the enclosing function class.
+                // The innermost enclosing function class decides attribution; a non-function class
+                // nested in a function class (e.g. a helper) still attributes to the function class.
                 for (int i = functionClassStack.size() - 1; i >= 0; i--) {
                     if (functionClassStack.get(i) != null) {
                         return functionClassStack.get(i);
@@ -377,19 +492,24 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
             }
 
             /**
-             * Resolves an expression naming a function to either its literal local name, or a
-             * reference to a {@code String}/{@code QName} constant to be resolved once every file
-             * has been scanned.
+             * A reference to a {@code String} or {@code QName} value, to be resolved once every
+             * file has been scanned.
              */
-            private @Nullable NameRef nameRef(final Expression expression) {
+            private @Nullable Ref ref(final Expression expression) {
                 if (expression instanceof J.Literal) {
                     final Object value = ((J.Literal) expression).getValue();
-                    return value instanceof String ? NameRef.literal((String) value) : null;
+                    return value instanceof String ? new Literal((String) value) : null;
                 }
                 if (expression instanceof J.NewClass
                         && TypeUtils.isOfClassType(((J.NewClass) expression).getType(), QNAME)) {
                     final List<Expression> args = ((J.NewClass) expression).getArguments();
-                    return args.isEmpty() ? null : nameRef(args.get(0));
+                    final Ref localName = args.isEmpty() ? null : ref(args.get(0));
+                    if (localName == null) {
+                        return null;
+                    }
+                    return new QNameRef(localName,
+                            args.size() > 1 ? ref(args.get(1)) : null,
+                            args.size() > 2 ? ref(args.get(2)) : null);
                 }
                 if (expression instanceof J.Identifier) {
                     return constantRef((J.Identifier) expression);
@@ -397,20 +517,29 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
                 if (expression instanceof J.FieldAccess) {
                     return constantRef(((J.FieldAccess) expression).getName());
                 }
+                if (expression instanceof J.MethodInvocation
+                        && "getLocalPart".equals(((J.MethodInvocation) expression).getSimpleName())
+                        && ((J.MethodInvocation) expression).getSelect() != null) {
+                    // `SOME_QNAME.getLocalPart()`: the local name of a QName constant.
+                    return ref(((J.MethodInvocation) expression).getSelect());
+                }
                 return null;
             }
 
-            private @Nullable NameRef constantRef(final J.Identifier identifier) {
+            private @Nullable Ref constantRef(final J.Identifier identifier) {
                 final JavaType.Variable field = identifier.getFieldType();
                 final JavaType.FullyQualified owner = field != null ? TypeUtils.asFullyQualified(field.getOwner()) : null;
                 if (owner != null) {
-                    return NameRef.constant(constantKey(owner.getFullyQualifiedName(), identifier.getSimpleName()));
+                    return new Constant(memberKey(owner.getFullyQualifiedName(), identifier.getSimpleName()));
                 }
                 // Missing type attribution: assume a constant in the enclosing class.
-                return classStack.isEmpty() ? null
-                        : NameRef.constant(constantKey(classStack.get(classStack.size() - 1), identifier.getSimpleName()));
+                return classStack.isEmpty() ? null : new Constant(memberKey(currentClass(), identifier.getSimpleName()));
             }
         }.visit(cu, ctx);
+    }
+
+    private static boolean isSignatureHelperName(final String name) {
+        return "functionSignature".equals(name) || "functionSignatures".equals(name);
     }
 
     private static boolean isFunctionImplementation(final JavaType.FullyQualified type) {
@@ -418,64 +547,176 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
                 && !TypeUtils.isAssignableTo(USER_DEFINED_FUNCTION, type);
     }
 
-    private static String constantKey(final String ownerFqn, final String name) {
+    private static String memberKey(final String ownerFqn, final String name) {
         return ownerFqn + "#" + name;
     }
 
     public static class Acc {
         final Map<String, Map<String, ClassInfo>> implementationsByPath = new LinkedHashMap<>();
-        final Map<String, NameRef> constants = new HashMap<>();
+        final Map<String, Ref> constants = new HashMap<>();
+        final Map<String, QNameRef> signatureHelpers = new HashMap<>();
+        /** Test paths by invocation key, see {@link XQueryCalls}. */
+        final Map<String, Set<String>> testPathsByInvocation = new HashMap<>();
+        /** Test paths by invoked local name, for functions whose namespace is unknown. */
         final Map<String, Set<String>> testPathsByLocalName = new HashMap<>();
+        private @Nullable Map<String, Set<String>> prefixesByNamespace;
+
+        void index(final String path, final Set<String> invocations) {
+            for (final String key : invocations) {
+                testPathsByInvocation.computeIfAbsent(key, k -> new LinkedHashSet<>()).add(path);
+                testPathsByLocalName.computeIfAbsent(XQueryCalls.localName(key), k -> new LinkedHashSet<>()).add(path);
+            }
+        }
+
+        Set<ResolvedName> resolveNames(final ClassInfo info) {
+            final Set<ResolvedName> resolved = new LinkedHashSet<>();
+            for (final SignatureName name : info.names) {
+                final ResolvedName r = resolve(name);
+                if (r != null) {
+                    resolved.add(r);
+                }
+            }
+            return resolved;
+        }
+
+        @Nullable ResolvedName resolve(final SignatureName name) {
+            final ResolvedName r = name.ref.resolve(this, 0);
+            if (r == null || r.namespaceUri != null || name.helperKey == null) {
+                return r;
+            }
+            // A bare local name passed to a module's helper takes the helper's namespace.
+            final QNameRef helper = signatureHelpers.get(name.helperKey);
+            final ResolvedName template = helper != null ? helper.resolve(this, 0) : null;
+            return template != null ? new ResolvedName(r.localName, template.namespaceUri, template.prefix) : r;
+        }
+
+        Set<String> matchingTestPaths(final ResolvedName name) {
+            if (name.namespaceUri == null) {
+                return testPathsByLocalName.getOrDefault(name.localName, Collections.emptySet());
+            }
+            final Set<String> paths = new LinkedHashSet<>(testPathsByInvocation.getOrDefault(
+                    XQueryCalls.qualifiedKey(name.namespaceUri, name.localName), Collections.emptySet()));
+            for (final String prefix : prefixesByNamespace().getOrDefault(name.namespaceUri, Collections.emptySet())) {
+                paths.addAll(testPathsByInvocation.getOrDefault(
+                        XQueryCalls.undeclaredPrefixKey(prefix, name.localName), Collections.emptySet()));
+            }
+            return paths;
+        }
+
+        /** The statically bound prefixes: the XQuery predeclared ones plus each module's default prefix. */
+        private Map<String, Set<String>> prefixesByNamespace() {
+            if (prefixesByNamespace == null) {
+                final Map<String, Set<String>> prefixes = new HashMap<>();
+                for (final Map.Entry<String, String> predeclared : XQueryCalls.PREDECLARED_PREFIXES.entrySet()) {
+                    prefixes.computeIfAbsent(predeclared.getValue(), ns -> new LinkedHashSet<>()).add(predeclared.getKey());
+                }
+                for (final Map<String, ClassInfo> classes : implementationsByPath.values()) {
+                    for (final ClassInfo info : classes.values()) {
+                        for (final ResolvedName name : resolveNames(info)) {
+                            if (name.namespaceUri != null && name.prefix != null && !name.prefix.isEmpty()) {
+                                prefixes.computeIfAbsent(name.namespaceUri, ns -> new LinkedHashSet<>()).add(name.prefix);
+                            }
+                        }
+                    }
+                }
+                prefixesByNamespace = prefixes;
+            }
+            return prefixesByNamespace;
+        }
     }
 
     private static class ClassInfo {
         final String className;
-        final List<NameRef> names = new ArrayList<>();
+        final List<SignatureName> names = new ArrayList<>();
 
         ClassInfo(final String className) {
             this.className = className;
         }
+    }
 
-        Set<String> resolveLocalNames(final Map<String, NameRef> constants) {
-            final Set<String> localNames = new LinkedHashSet<>();
-            for (final NameRef ref : names) {
-                final String localName = ref.resolve(constants);
-                if (localName != null) {
-                    localNames.add(localName);
-                }
-            }
-            return localNames;
+    /** The name a function registers, and the helper it registered it through, if any. */
+    private static class SignatureName {
+        final Ref ref;
+        final @Nullable String helperKey;
+
+        SignatureName(final Ref ref, final @Nullable String helperKey) {
+            this.ref = ref;
+            this.helperKey = helperKey;
         }
     }
 
-    /** Either a literal local name or the key of a constant holding one. */
-    private static class NameRef {
-        final @Nullable String literal;
-        final @Nullable String constantKey;
+    @Value
+    static class ResolvedName {
+        String localName;
+        @Nullable String namespaceUri;
+        @Nullable String prefix;
+    }
 
-        private NameRef(final @Nullable String literal, final @Nullable String constantKey) {
-            this.literal = literal;
-            this.constantKey = constantKey;
+    /** An unresolved {@code String} or {@code QName} value. */
+    private abstract static class Ref {
+        // Bounds constant chains, guarding against a cycle.
+        static final int MAX_DEPTH = 16;
+
+        abstract @Nullable ResolvedName resolve(Acc acc, int depth);
+
+        static @Nullable String resolveString(final @Nullable Ref ref, final Acc acc, final int depth) {
+            final ResolvedName r = ref != null ? ref.resolve(acc, depth + 1) : null;
+            return r != null ? r.localName : null;
+        }
+    }
+
+    private static class Literal extends Ref {
+        final String value;
+
+        Literal(final String value) {
+            this.value = value;
         }
 
-        static NameRef literal(final String value) {
-            return new NameRef(value, null);
+        @Override
+        @Nullable ResolvedName resolve(final Acc acc, final int depth) {
+            return new ResolvedName(value, null, null);
+        }
+    }
+
+    private static class Constant extends Ref {
+        final String key;
+
+        Constant(final String key) {
+            this.key = key;
         }
 
-        static NameRef constant(final String key) {
-            return new NameRef(null, key);
+        @Override
+        @Nullable ResolvedName resolve(final Acc acc, final int depth) {
+            final Ref target = acc.constants.get(key);
+            return target != null && depth < MAX_DEPTH ? target.resolve(acc, depth + 1) : null;
+        }
+    }
+
+    private static class QNameRef extends Ref {
+        final Ref localName;
+        final @Nullable Ref namespaceUri;
+        final @Nullable Ref prefix;
+
+        QNameRef(final Ref localName, final @Nullable Ref namespaceUri, final @Nullable Ref prefix) {
+            this.localName = localName;
+            this.namespaceUri = namespaceUri;
+            this.prefix = prefix;
         }
 
-        @Nullable String resolve(final Map<String, NameRef> constants) {
-            NameRef ref = this;
-            // Bounded to guard against a constant cycle.
-            for (int hops = 0; ref != null && hops < 16; hops++) {
-                if (ref.literal != null) {
-                    return ref.literal;
-                }
-                ref = constants.get(ref.constantKey);
+        @Override
+        @Nullable ResolvedName resolve(final Acc acc, final int depth) {
+            if (depth >= MAX_DEPTH) {
+                return null;
             }
-            return null;
+            final String local = resolveString(localName, acc, depth);
+            if (local == null) {
+                return null;
+            }
+            String ns = resolveString(namespaceUri, acc, depth);
+            if (ns != null && ns.isEmpty()) {
+                ns = null;
+            }
+            return new ResolvedName(local, ns, resolveString(prefix, acc, depth));
         }
     }
 }
