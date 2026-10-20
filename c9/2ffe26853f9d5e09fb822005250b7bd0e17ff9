@@ -1,0 +1,27 @@
+src/test/java/org/exist/moderne/exist7/WebSecurityRecipesTest.java
+  s_a7d6e6f60f68e5::t_3b422909cd32c9 225-226
+  s_a7d6e6f60f68e5::t_e287d19a3b41a3 1-224,227-247
+src/main/java/org/exist/moderne/exist7/FindPublicRestServer.java
+  s_a7d6e6f60f68e5::t_fae5a6b6f570db 1-81
+src/main/java/org/exist/moderne/exist7/RestrictRestSubmissions.java
+  s_a7d6e6f60f68e5::t_64cd033b7c6b92 119-121
+  s_a7d6e6f60f68e5::t_2cb7439edbe292 1-118,122-155
+src/main/resources/META-INF/rewrite/exist7-upgrade.yml
+  s_a7d6e6f60f68e5::t_24258ddf90813b 97-114,128-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c92ffe26853f9d5e09fb822005250b7bd0e17ff9",
+  "prompts": {},
+  "sessions": {
+    "s_a7d6e6f60f68e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0026424-4a8c-4bda-aabf-6c3cb9af1842",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
