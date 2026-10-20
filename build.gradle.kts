@@ -4,6 +4,16 @@ plugins {
     `maven-publish`
 }
 
+// recipe-repositories only adds Code Genome when these properties are set.
+require(
+    providers.gradleProperty("codegenomeUsername").isPresent &&
+        providers.gradleProperty("codegenomePassword").isPresent
+) {
+    "Set codegenomeUsername and codegenomePassword (e.g. in ~/.gradle/gradle.properties, " +
+        "or ORG_GRADLE_PROJECT_codegenomeUsername / ORG_GRADLE_PROJECT_codegenomePassword) " +
+        "to resolve from https://artifacts.codegenomeproject.org/maven"
+}
+
 publishing {
     publications {
         create<MavenPublication>("maven") {
