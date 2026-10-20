@@ -1,7 +1,17 @@
 plugins {
-    id("org.openrewrite.build.recipe-library-base") version "2.20.0"
-    id("org.openrewrite.build.recipe-repositories") version "2.20.0"
+    id("org.openrewrite.build.recipe-library-base") version "2.27.1"
+    id("org.openrewrite.build.recipe-repositories") version "2.27.1"
     `maven-publish`
+}
+
+// recipe-repositories only adds Code Genome when these properties are set.
+require(
+    providers.gradleProperty("codegenomeUsername").isPresent &&
+        providers.gradleProperty("codegenomePassword").isPresent
+) {
+    "Set codegenomeUsername and codegenomePassword (e.g. in ~/.gradle/gradle.properties, " +
+        "or ORG_GRADLE_PROJECT_codegenomeUsername / ORG_GRADLE_PROJECT_codegenomePassword) " +
+        "to resolve from https://artifacts.codegenomeproject.org/maven"
 }
 
 publishing {
@@ -33,7 +43,12 @@ version = System.getenv("GITHUB_REF_TYPE")
 description = "Moderne/OpenRewrite recipes for eXist-db."
 
 dependencies {
-    implementation(platform("org.openrewrite.recipe:rewrite-recipe-bom:3.37.0"))
+    implementation(platform("org.openrewrite.recipe:rewrite-recipe-bom:3.41.0"))
+
+    // Older rewrite-core still asks for 1.0.1, which is not on Code Genome; 1.0.2 is.
+    constraints {
+        implementation("org.openrewrite.tools:java-object-diff:1.0.2")
+    }
 
     implementation("org.openrewrite:rewrite-java")
 

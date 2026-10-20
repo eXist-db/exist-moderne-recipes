@@ -23,4 +23,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
 
       - name: Test
+        env:
+          # Maps to Gradle project properties codegenomeUsername / codegenomePassword
+          # (also used by org.openrewrite.build.recipe-repositories).
+          ORG_GRADLE_PROJECT_codegenomeUsername: ${{ secrets.CODEGENOME_USERNAME }}
+          ORG_GRADLE_PROJECT_codegenomePassword: ${{ secrets.CODEGENOME_TOKEN }}
         run: ./gradlew test
