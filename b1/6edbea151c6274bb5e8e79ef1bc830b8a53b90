@@ -1,0 +1,21 @@
+src/test/java/org/exist/moderne/exist7/ExistDb641UpgradeTest.java
+  s_a7d6e6f60f68e5::t_84363d43d72de6 183-184,187
+  s_a7d6e6f60f68e5::t_fb76dd7aa9bf53 124-182,185-186,188-231
+  s_a7d6e6f60f68e5::t_148ead29362104 123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b16edbea151c6274bb5e8e79ef1bc830b8a53b90",
+  "prompts": {},
+  "sessions": {
+    "s_a7d6e6f60f68e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0026424-4a8c-4bda-aabf-6c3cb9af1842",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
