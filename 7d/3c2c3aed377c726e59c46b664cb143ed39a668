@@ -1,0 +1,62 @@
+src/test/resources/org/exist/moderne/exist7/jetty/jetty-7.0.xml
+  s_a7d6e6f60f68e5::t_dcdea1e74a286d 1-117
+src/test/resources/org/exist/moderne/exist7/jetty/exist-webapp-context-6.4.1.xml
+  s_a7d6e6f60f68e5::t_5864d62322f1ab 1-24
+src/test/resources/org/exist/moderne/exist7/webapp/controller-config-6.4.1.xml
+  s_a7d6e6f60f68e5::t_dcdea1e74a286d 1-81
+src/test/resources/org/exist/moderne/exist7/README.md
+  s_a7d6e6f60f68e5::t_4b602754a94349 14-19,21-23
+  s_a7d6e6f60f68e5::t_5864d62322f1ab 20
+src/test/resources/org/exist/moderne/exist7/jetty/jetty-requestlog-7.0.xml
+  s_a7d6e6f60f68e5::t_dcdea1e74a286d 1-24
+src/test/resources/org/exist/moderne/exist7/jetty/jetty-deploy-7.0.xml
+  s_a7d6e6f60f68e5::t_26efba41b7d61a 1,6-7,9-32,34-48
+  s_a7d6e6f60f68e5::t_dcdea1e74a286d 2-5,8,33,49
+src/main/java/org/exist/moderne/exist7/FindJettyClass.java
+  s_a7d6e6f60f68e5::t_b2f2e32e655f4e 1-25,27-92,94-96
+  s_a7d6e6f60f68e5::t_38341933f34092 26,93
+src/test/resources/org/exist/moderne/exist7/jetty/jetty-6.4.1.xml
+  s_a7d6e6f60f68e5::t_dcdea1e74a286d 1-114
+src/test/java/org/exist/moderne/exist7/WebApplicationUpgradeTest.java
+  s_a7d6e6f60f68e5::t_90c769122acc3e 1-236,240-249,251-313
+  s_a7d6e6f60f68e5::t_5864d62322f1ab 237-239,250
+src/main/java/org/exist/moderne/exist7/AddServletMapping.java
+  s_a7d6e6f60f68e5::t_ba21dff57e01d4 1-126
+src/test/resources/org/exist/moderne/exist7/jetty/jetty-deploy-6.4.1.xml
+  s_a7d6e6f60f68e5::t_dcdea1e74a286d 2-8,11,25-36,55,57,66
+  s_a7d6e6f60f68e5::t_26efba41b7d61a 1,9-10,12-24,37-54,56,58-65
+src/test/resources/org/exist/moderne/exist7/jetty/jetty-requestlog-6.4.1.xml
+  s_a7d6e6f60f68e5::t_dcdea1e74a286d 1-30
+src/main/resources/META-INF/rewrite/exist7.yml
+  s_a7d6e6f60f68e5::t_45031bc0f2b5cb 2-3,481-531
+src/main/resources/META-INF/rewrite/exist7-upgrade.yml
+  s_a7d6e6f60f68e5::t_45031bc0f2b5cb 32-34,358-370,377-382,384-424
+  s_a7d6e6f60f68e5::t_0f34736e50767f 383
+  s_a7d6e6f60f68e5::t_f6f142587b9ee5 371-376
+src/test/resources/org/exist/moderne/exist7/webapp/controller-config-7.0.xml
+  s_a7d6e6f60f68e5::t_dcdea1e74a286d 1-82
+src/test/resources/org/exist/moderne/exist7/webapp/web-6.4.1.xml
+  s_a7d6e6f60f68e5::t_dcdea1e74a286d 1-7,16-18,20-34,36-37,46-52,57-65,71-74,79-81,87-89,99-108,114-130,136-151,159-161,197,199-200,226-227,232,239-243,245-249,251,258-259,272-273,279-280,282-292,300-304,307-311,314-318,320-321,351-357,367-375,377-410
+  s_a7d6e6f60f68e5::t_26efba41b7d61a 8-15,19,35,38-45,53-56,66-70,75-78,82-86,90-98,109-113,131-135,152-158,162-196,198,201-225,228-231,233-238,244,250,252-257,260-271,274-278,281,293-299,305-306,312-313,319,322-350,358-366,376
+src/test/resources/org/exist/moderne/exist7/jetty/exist-webapp-context-7.0.xml
+  s_a7d6e6f60f68e5::t_5864d62322f1ab 1-47
+src/test/resources/org/exist/moderne/exist7/webapp/web-7.0.xml
+  s_a7d6e6f60f68e5::t_dcdea1e74a286d 1-7,16-18,20-34,36-37,46-52,57-65,71-74,79-81,87-89,99-108,114-130,136-151,159-161,174-176,182-183,204-208,215-216,221,228-232,234-238,240,247-248,261-262,268-269,271-281,293-297,300-304,307-311,313-314,344-350,360-368,370-403
+  s_a7d6e6f60f68e5::t_26efba41b7d61a 8-15,19,35,38-45,53-56,66-70,75-78,82-86,90-98,109-113,131-135,152-158,162-173,177-181,184-203,209-214,217-220,222-227,233,239,241-246,249-260,263-267,270,282-292,298-299,305-306,312,315-343,351-359,369
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7d3c2c3aed377c726e59c46b664cb143ed39a668",
+  "prompts": {},
+  "sessions": {
+    "s_a7d6e6f60f68e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0026424-4a8c-4bda-aabf-6c3cb9af1842",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
