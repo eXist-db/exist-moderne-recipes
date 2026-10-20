@@ -1,0 +1,36 @@
+src/test/resources/org/exist/moderne/exist7/mime-types-6.4.1.xml
+  s_a7d6e6f60f68e5::t_b282586db90e4b 1-442
+src/test/resources/org/exist/moderne/exist7/README.md
+  s_a7d6e6f60f68e5::t_b282586db90e4b 23-27
+src/test/resources/org/exist/moderne/exist7/webapp/descriptor-7.0.xml
+  s_a7d6e6f60f68e5::t_b282586db90e4b 1-67
+src/main/resources/META-INF/rewrite/exist7-upgrade.yml
+  s_a7d6e6f60f68e5::t_41ad291eb25bd2 435-436
+  s_a7d6e6f60f68e5::t_b612ba9b7e8478 56,426-434,437-527
+src/test/java/org/exist/moderne/exist7/SchemaVersionRecipesTest.java
+  s_a7d6e6f60f68e5::t_114776b1be4f29 1-146
+src/test/resources/org/exist/moderne/exist7/webapp/descriptor-6.4.1.xml
+  s_a7d6e6f60f68e5::t_b282586db90e4b 1-67
+src/test/resources/org/exist/moderne/exist7/mime-types-7.0.xml
+  s_a7d6e6f60f68e5::t_b282586db90e4b 1-579
+src/test/resources/org/exist/moderne/exist7/collection-6.4.1.xconf
+  s_a7d6e6f60f68e5::t_b282586db90e4b 1-6
+src/test/resources/org/exist/moderne/exist7/collection-7.0.xconf
+  s_a7d6e6f60f68e5::t_b282586db90e4b 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1e6a5d95a82e8f09be9445da94c25cb732f7d176",
+  "prompts": {},
+  "sessions": {
+    "s_a7d6e6f60f68e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0026424-4a8c-4bda-aabf-6c3cb9af1842",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
