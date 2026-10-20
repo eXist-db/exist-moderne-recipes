@@ -1,0 +1,25 @@
+.github/workflows/ci.yml
+  s_e871fd49c7ec58::t_7e12f82deb6945 26-30
+build.gradle.kts
+  s_e871fd49c7ec58::t_2fbb640e8207ac 7-16
+settings.gradle.kts
+  s_e871fd49c7ec58::t_e74d0480611a69 3-16
+.github/workflows/publish.yml
+  s_e871fd49c7ec58::t_239a37b9158b27 31-33,40-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "540dcc13974e8bcb2f4165773fd3142e486af93c",
+  "prompts": {},
+  "sessions": {
+    "s_e871fd49c7ec58": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "57c74ced-8114-415d-a750-d88673fe3f5f",
+        "model": "default"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
