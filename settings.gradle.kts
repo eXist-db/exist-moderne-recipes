@@ -1,22 +1,13 @@
 pluginManagement {
     repositories {
-        maven {
-            name = "codegenome"
-            url = uri("https://artifacts.codegenomeproject.org/maven")
-            credentials {
-                username = providers.gradleProperty("codegenomeUsername").orNull
-                    ?: System.getenv("CODEGENOME_USERNAME")
-                password = providers.gradleProperty("codegenomePassword").orNull
-                    ?: System.getenv("CODEGENOME_TOKEN")
-            }
-            content {
-                includeGroupAndSubgroups("org.openrewrite")
-                includeGroupAndSubgroups("io.moderne")
-            }
-        }
         gradlePluginPortal()
-        mavenCentral()
     }
+}
+
+// Adds Code Genome to pluginManagement so org.openrewrite.build.* plugin
+// classpaths can resolve rewrite-* (portal alone is not enough post-cutover).
+plugins {
+    id("org.openrewrite.build.settings") version "2.27.1"
 }
 
 rootProject.name = "exist-moderne-recipes"

@@ -43,7 +43,12 @@ version = System.getenv("GITHUB_REF_TYPE")
 description = "Moderne/OpenRewrite recipes for eXist-db."
 
 dependencies {
-    implementation(platform("org.openrewrite.recipe:rewrite-recipe-bom:3.37.0"))
+    implementation(platform("org.openrewrite.recipe:rewrite-recipe-bom:3.41.0"))
+
+    // Older rewrite-core still asks for 1.0.1, which is not on Code Genome; 1.0.2 is.
+    constraints {
+        implementation("org.openrewrite.tools:java-object-diff:1.0.2")
+    }
 
     implementation("org.openrewrite:rewrite-java")
 
