@@ -1,0 +1,27 @@
+src/test/java/org/exist/moderne/RecipeCatalogTest.java
+  s_a7d6e6f60f68e5::t_a7660ba6900a63 1-46
+src/main/java/org/exist/moderne/exist7/AddDisabledConfDeclaration.java
+  s_a7d6e6f60f68e5::t_bac5d99ed7c19f 59,62,76,98,103
+src/main/java/org/exist/moderne/exist7/RemoveRedundantConfDeclaration.java
+  s_a7d6e6f60f68e5::t_bac5d99ed7c19f 71,74,88,121
+src/test/java/org/exist/moderne/exist7/ExistDb641UpgradeTest.java
+  s_a7d6e6f60f68e5::t_c4cbb86f7090fa 131
+src/main/resources/META-INF/rewrite/exist7.yml
+  s_a7d6e6f60f68e5::t_9d3cc9bb4ff6b2 28,32,36,40,44,48,52,56,60,64,68,72,76,80,84,88,92,96,100,104,108,112,116,120,124,128,132,136,140,144,148,152,156,160,164,168,172,176,180,184,188,192,196,200,217,221,225,229,251,255,259,263,267,271,275,279,283,287,291,295,299,303,307,311,315,319,323,327,331,335,339,343,347,351,355,359,363,367,371,375,379,383,387,391,395,399,403,407,411,415,419,423,427,431
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f54f004b0c4089102b62dafbcedc024a1c1ee3da",
+  "prompts": {},
+  "sessions": {
+    "s_a7d6e6f60f68e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0026424-4a8c-4bda-aabf-6c3cb9af1842",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
