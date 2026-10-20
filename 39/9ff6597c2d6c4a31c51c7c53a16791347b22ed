@@ -1,0 +1,20 @@
+src/main/java/org/exist/moderne/exist7/ConfXml.java
+  s_a7d6e6f60f68e5::t_8eb526e61803f1 149-166
+  s_a7d6e6f60f68e5::t_afe467c423d30c 99,102,106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "399ff6597c2d6c4a31c51c7c53a16791347b22ed",
+  "prompts": {},
+  "sessions": {
+    "s_a7d6e6f60f68e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0026424-4a8c-4bda-aabf-6c3cb9af1842",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
