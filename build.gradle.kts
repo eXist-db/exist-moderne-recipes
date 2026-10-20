@@ -23,7 +23,13 @@ publishing {
 }
 
 group = "org.exist.moderne"
-version = "1.0.0"
+// Release builds take their version from the pushed `v*` tag; everything else is a snapshot.
+// `mod run` caches by GAV, so for local iteration pass a unique `-PreleaseVersion=...`.
+version = System.getenv("GITHUB_REF_TYPE")
+    ?.takeIf { it == "tag" }
+    ?.let { System.getenv("GITHUB_REF_NAME").removePrefix("v") }
+    ?: findProperty("releaseVersion")?.toString()
+    ?: "1.0.1-SNAPSHOT"
 description = "Moderne/OpenRewrite recipes for eXist-db."
 
 dependencies {
@@ -34,6 +40,6 @@ dependencies {
     testImplementation("org.openrewrite:rewrite-test") {
         exclude(group = "org.slf4j", module = "slf4j-nop")
     }
-    testImplementation("org.assertj:assertj-core:latest.release")
+    testImplementation("org.assertj:assertj-core:3.27.7")
     testRuntimeOnly("org.openrewrite:rewrite-java-17")
 }
