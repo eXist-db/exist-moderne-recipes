@@ -1,0 +1,50 @@
+src/main/java/org/exist/moderne/exist7/ReplaceSnapshotProcessorVersions.java
+  s_a7d6e6f60f68e5::t_a6773243fd8e65 1-80
+src/main/java/org/exist/moderne/exist7/AddExistDbProcessorDependency.java
+  s_a7d6e6f60f68e5::t_9bb58e17eddf0c 97-98,100-101
+  s_a7d6e6f60f68e5::t_c0a0ba25aa1669 1-96,99,102-107
+src/main/java/org/exist/moderne/exist7/ExpathPkg.java
+  s_a7d6e6f60f68e5::t_9daa56394c2815 1-64
+src/main/java/org/exist/moderne/exist7/RegisterLibraryModules.java
+  s_a7d6e6f60f68e5::t_fcbbfef39b6baa 41,212
+  s_a7d6e6f60f68e5::t_44fcd45c84a751 39,282
+  s_a7d6e6f60f68e5::t_3cd5bca41e11b4 1-38,40,42-211,213-281,283-284
+src/main/java/org/exist/moderne/exist7/FindProcessorDependenciesExcludingExistDb7.java
+  s_a7d6e6f60f68e5::t_0b767756bdbe2f 1-93
+src/main/java/org/exist/moderne/exist7/FindUndeclaredPackageDependency.java
+  s_a7d6e6f60f68e5::t_0a47c5bf6a2bf9 187-190
+  s_a7d6e6f60f68e5::t_7bf04314b87ab1 159-161
+  s_a7d6e6f60f68e5::t_562757a41d79cf 1-123,143-158,162-186,191-194
+  s_a7d6e6f60f68e5::t_95110237f06932 124-142
+src/main/java/org/exist/moderne/exist7/XQueryModules.java
+  s_a7d6e6f60f68e5::t_44fcd45c84a751 27,96
+  s_a7d6e6f60f68e5::t_09147a1053e168 1-26,28-95,97-118
+src/main/resources/META-INF/rewrite/exist7.yml
+  s_a7d6e6f60f68e5::t_61848807aae0be 434-479
+  s_a7d6e6f60f68e5::t_7877abf9acf347 1-2
+src/main/resources/META-INF/rewrite/exist7-upgrade.yml
+  s_a7d6e6f60f68e5::t_61848807aae0be 327-328,336-337
+  s_a7d6e6f60f68e5::t_9b41065fd614ba 39-40
+  s_a7d6e6f60f68e5::t_174d432fb39615 31,52,319-326,329-335
+src/test/java/org/exist/moderne/exist7/ExpathPkgRecipesTest.java
+  s_a7d6e6f60f68e5::t_3c28c9b97efa42 1-197
+src/test/java/org/exist/moderne/exist7/PackageComponentRecipesTest.java
+  s_a7d6e6f60f68e5::t_758bdd6f78f0b9 1-293,357-369
+  s_a7d6e6f60f68e5::t_61ef8bf9b9c950 294-356
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cc24bcd962abc8c66606daebcfc55cc180b735de",
+  "prompts": {},
+  "sessions": {
+    "s_a7d6e6f60f68e5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0026424-4a8c-4bda-aabf-6c3cb9af1842",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
