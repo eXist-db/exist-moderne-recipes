@@ -69,6 +69,24 @@ public class XQueryDynamicInvocationCoverageTable extends DataTable<XQueryDynami
                         "likely exercised via XQuery string dispatch even though no direct Java call exists.")
         boolean dynamicallyInvokedInTests;
 
+        @Column(displayName = "Test kinds",
+                description = "How the matching tests run in CI: `unit` (Surefire, including the XQSuite and " +
+                        "XML suites), `integration` (Failsafe `*IT` classes), `container` (BATS tests against " +
+                        "the Docker image) and/or `runner` (the XQSuite/XML test runner libraries themselves). " +
+                        "A function covered only by `runner` is executed by the test harness, not asserted on.")
+        String testKinds;
+
+        @Column(displayName = "Declared arities",
+                description = "The arities the function's signatures declare, e.g. `1, 2` or `1+` for a " +
+                        "variadic signature; `?` marks a signature whose arity could not be resolved.")
+        String declaredArities;
+
+        @Column(displayName = "Untested arities",
+                description = "The declared arities no matching test invokes (by argument count, `=>` arrow " +
+                        "call, `name#arity` reference or `function-lookup(..., arity)`); empty if all are " +
+                        "invoked or none could be resolved.")
+        String untestedArities;
+
         @Column(displayName = "Matching test paths",
                 description = "Semicolon-separated paths of the test sources/resources whose text " +
                         "matched this function, or empty if none matched.")

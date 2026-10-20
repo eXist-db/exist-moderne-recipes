@@ -43,6 +43,7 @@ import org.openrewrite.xml.tree.Xml;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -135,8 +136,10 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
                 } else if (tree instanceof PlainText) {
                     final PlainText pt = (PlainText) tree;
                     final String path = pt.getSourcePath().toString();
-                    if (isXQueryFile(path) && (isTestPath(path) || isTestRunnerLibrary(path))) {
+                    if (isXQueryFile(path) && isTestPath(path)) {
                         acc.index(path, XQueryCalls.invocations(pt.getText(), true));
+                    } else if (isXQueryFile(path) && isTestRunnerLibrary(path)) {
+                        acc.index(path, XQueryCalls.invocations(pt.getText(), false));
                     } else if (path.endsWith(".bats") && isTestPath(path)) {
                         // BATS integration tests run queries against a container via the client or REST API.
                         acc.index(path, XQueryCalls.invocations(pt.getText(), false));
@@ -167,7 +170,8 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
                     final Map<String, ClassInfo> classes = acc.implementationsByPath.get(path);
                     if (classes != null) {
                         for (final ClassInfo info : classes.values()) {
-                            for (final ResolvedName name : acc.resolveNames(info)) {
+                            for (final Map.Entry<ResolvedName, Arities> entry : acc.resolveNames(info).entrySet()) {
+                                final ResolvedName name = entry.getKey();
                                 final Set<String> matches = acc.matchingTestPaths(name);
                                 table.insertRow(ctx, new XQueryDynamicInvocationCoverageTable.Row(
                                         path,
@@ -175,6 +179,9 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
                                         name.namespaceUri != null ? name.namespaceUri : "",
                                         name.localName,
                                         !matches.isEmpty(),
+                                        String.join(", ", acc.testKinds(matches)),
+                                        entry.getValue().format(),
+                                        entry.getValue().formatUntested(acc.matchingArities(name)),
                                         String.join("; ", matches)
                                 ));
                             }
@@ -224,6 +231,31 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
             }
         }
         return false;
+    }
+
+    /**
+     * Classifies the test evidence at a path by how CI runs it: {@code runner} (the test runner
+     * libraries), {@code container} (BATS tests against a Docker image, and their fixtures),
+     * {@code integration} (Java classes matching Maven Failsafe's default includes, {@code IT*},
+     * {@code *IT} and {@code *ITCase}, run in a separate CI job), or {@code unit} (everything run
+     * by Surefire, including the XQSuite and XML suites).
+     */
+    static String testKind(final String path) {
+        final String normalized = path.replace('\\', '/');
+        if (isTestRunnerLibrary(normalized)) {
+            return TestKind.RUNNER;
+        }
+        if (normalized.endsWith(".bats") || normalized.contains("/bats/")) {
+            return TestKind.CONTAINER;
+        }
+        final String fileName = normalized.substring(normalized.lastIndexOf('/') + 1);
+        if (fileName.endsWith(".java")) {
+            final String className = fileName.substring(0, fileName.length() - ".java".length());
+            if (className.startsWith("IT") || className.endsWith("IT") || className.endsWith("ITCase")) {
+                return TestKind.INTEGRATION;
+            }
+        }
+        return TestKind.UNIT;
     }
 
     /**
@@ -416,7 +448,7 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
             public J.NewClass visitNewClass(final J.NewClass newClass, final ExecutionContext c) {
                 final J.NewClass result = super.visitNewClass(newClass, c);
                 if (TypeUtils.isOfClassType(result.getType(), FUNCTION_SIGNATURE)) {
-                    recordFirstArg(result.getArguments(), null);
+                    recordFirstArg(result.getArguments(), null, constructorArities(result));
                 } else if (TypeUtils.isOfClassType(result.getType(), QNAME)) {
                     recordSignatureHelper(result);
                 }
@@ -431,7 +463,7 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
                     final JavaType.Method type = result.getMethodType();
                     recordFirstArg(result.getArguments(), type != null
                             ? memberKey(type.getDeclaringType().getFullyQualifiedName(), result.getSimpleName())
-                            : null);
+                            : null, helperArities(result));
                 }
                 return result;
             }
@@ -462,7 +494,8 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
                 }
             }
 
-            private void recordFirstArg(final List<Expression> args, final @Nullable String helperKey) {
+            private void recordFirstArg(final List<Expression> args, final @Nullable String helperKey,
+                    final @Nullable ArityRef arities) {
                 final String className = currentFunctionClass();
                 if (className == null || args.isEmpty()) {
                     return;
@@ -472,8 +505,122 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
                     acc.implementationsByPath
                             .computeIfAbsent(path, p -> new LinkedHashMap<>())
                             .computeIfAbsent(className, ClassInfo::new)
-                            .names.add(new SignatureName(ref, helperKey));
+                            .names.add(new SignatureName(ref, helperKey, arities));
                 }
+            }
+
+            /**
+             * The arity of {@code new FunctionSignature(name, [description,] arguments, returnType[, variadic][, deprecated])}:
+             * the length of its {@code SequenceType[]} argument, and whether {@code variadic} is {@code true}.
+             */
+            private @Nullable ArityRef constructorArities(final J.NewClass signature) {
+                final JavaType.Method constructor = signature.getConstructorType();
+                if (constructor == null) {
+                    return null;
+                }
+                final List<Expression> args = arguments(signature.getArguments());
+                final List<JavaType> paramTypes = constructor.getParameterTypes();
+                final List<String> paramNames = constructor.getParameterNames();
+                Ref lengths = null;
+                boolean variadic = false;
+                for (int i = 0; i < Math.min(args.size(), paramTypes.size()); i++) {
+                    if (lengths == null && paramTypes.get(i) instanceof JavaType.Array) {
+                        lengths = arrayRef(args.get(i));
+                    } else if ("variadic".equals(paramNames.get(i)) && args.get(i) instanceof J.Literal
+                            && Boolean.TRUE.equals(((J.Literal) args.get(i)).getValue())) {
+                        variadic = true;
+                    }
+                }
+                return lengths != null ? new ArityRef(lengths, variadic) : null;
+            }
+
+            /**
+             * The arities of {@code functionSignature(name, description, returnType, params...)} or
+             * {@code functionSignatures(name, description, returnType, arities)}: the parameters
+             * from its first array-typed parameter on, as varargs or as one array (of arrays, for
+             * several arities).
+             */
+            private @Nullable ArityRef helperArities(final J.MethodInvocation helper) {
+                final JavaType.Method type = helper.getMethodType();
+                if (type == null) {
+                    return null;
+                }
+                final List<Expression> args = arguments(helper.getArguments());
+                final List<JavaType> paramTypes = type.getParameterTypes();
+                for (int i = 0; i < paramTypes.size(); i++) {
+                    if (paramTypes.get(i) instanceof JavaType.Array) {
+                        final boolean severalArities = ((JavaType.Array) paramTypes.get(i)).getElemType() instanceof JavaType.Array;
+                        final List<Expression> rest = i < args.size() ? args.subList(i, args.size()) : Collections.emptyList();
+                        if (rest.size() == 1 && rest.get(0).getType() instanceof JavaType.Array) {
+                            final Ref lengths = arrayRef(rest.get(0));
+                            return lengths != null ? new ArityRef(lengths, false) : null;
+                        }
+                        if (!severalArities) {
+                            return new ArityRef(new LengthRef(rest.size()), false);
+                        }
+                        final List<Ref> rows = new ArrayList<>();
+                        for (final Expression row : rest) {
+                            rows.add(arrayRef(row));
+                        }
+                        return new ArityRef(new ArraysRef(rows), false);
+                    }
+                }
+                return null;
+            }
+
+            /**
+             * A reference to the length of a {@code SequenceType[]}, or the lengths of the rows of a
+             * {@code SequenceType[][]}: an array creation, {@code null}, a FunctionDSL
+             * {@code arity(...)}/{@code params(...)}/{@code arities(...)} call, or an array constant.
+             */
+            private @Nullable Ref arrayRef(final Expression expression) {
+                if (expression instanceof J.Literal && ((J.Literal) expression).getValue() == null) {
+                    return new LengthRef(0);
+                }
+                if (expression instanceof J.NewArray) {
+                    final J.NewArray array = (J.NewArray) expression;
+                    if (array.getInitializer() != null) {
+                        final List<Expression> elements = arguments(array.getInitializer());
+                        final JavaType type = array.getType();
+                        if (type instanceof JavaType.Array && ((JavaType.Array) type).getElemType() instanceof JavaType.Array) {
+                            final List<Ref> rows = new ArrayList<>();
+                            for (final Expression row : elements) {
+                                rows.add(arrayRef(row));
+                            }
+                            return new ArraysRef(rows);
+                        }
+                        return new LengthRef(elements.size());
+                    }
+                    if (array.getDimensions().size() == 1
+                            && array.getDimensions().get(0).getIndex() instanceof J.Literal
+                            && ((J.Literal) array.getDimensions().get(0).getIndex()).getValue() instanceof Integer) {
+                        return new LengthRef((Integer) ((J.Literal) array.getDimensions().get(0).getIndex()).getValue());
+                    }
+                    return null;
+                }
+                if (expression instanceof J.MethodInvocation) {
+                    final J.MethodInvocation method = (J.MethodInvocation) expression;
+                    final List<Expression> args = arguments(method.getArguments());
+                    if ("arity".equals(method.getSimpleName()) || "params".equals(method.getSimpleName())) {
+                        return args.size() == 1 && args.get(0).getType() instanceof JavaType.Array
+                                ? arrayRef(args.get(0)) : new LengthRef(args.size());
+                    }
+                    if ("arities".equals(method.getSimpleName())) {
+                        final List<Ref> rows = new ArrayList<>();
+                        for (final Expression row : args) {
+                            rows.add(arrayRef(row));
+                        }
+                        return new ArraysRef(rows);
+                    }
+                    return null;
+                }
+                if (expression instanceof J.Identifier) {
+                    return constantRef((J.Identifier) expression);
+                }
+                if (expression instanceof J.FieldAccess) {
+                    return constantRef(((J.FieldAccess) expression).getName());
+                }
+                return null;
             }
 
             private String currentClass() {
@@ -523,6 +670,10 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
                     // `SOME_QNAME.getLocalPart()`: the local name of a QName constant.
                     return ref(((J.MethodInvocation) expression).getSelect());
                 }
+                if (expression instanceof J.NewArray || expression instanceof J.MethodInvocation) {
+                    // An array constant, e.g. `NO_ARGS = new SequenceType[0]` or `FS_PARAMS = arity(...)`.
+                    return arrayRef(expression);
+                }
                 return null;
             }
 
@@ -551,6 +702,28 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
         return ownerFqn + "#" + name;
     }
 
+    /** Drops the {@code J.Empty} OpenRewrite uses for an empty argument or initializer list. */
+    private static List<Expression> arguments(final List<Expression> expressions) {
+        final List<Expression> arguments = new ArrayList<>(expressions.size());
+        for (final Expression expression : expressions) {
+            if (!(expression instanceof J.Empty)) {
+                arguments.add(expression);
+            }
+        }
+        return arguments;
+    }
+
+    static final class TestKind {
+        static final String UNIT = "unit";
+        static final String INTEGRATION = "integration";
+        static final String CONTAINER = "container";
+        static final String RUNNER = "runner";
+        static final List<String> ORDER = java.util.Arrays.asList(UNIT, INTEGRATION, CONTAINER, RUNNER);
+
+        private TestKind() {
+        }
+    }
+
     public static class Acc {
         final Map<String, Map<String, ClassInfo>> implementationsByPath = new LinkedHashMap<>();
         final Map<String, Ref> constants = new HashMap<>();
@@ -559,24 +732,59 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
         final Map<String, Set<String>> testPathsByInvocation = new HashMap<>();
         /** Test paths by invoked local name, for functions whose namespace is unknown. */
         final Map<String, Set<String>> testPathsByLocalName = new HashMap<>();
+        /** Invoked arities by invocation key, and by local name. */
+        final Map<String, Set<Integer>> aritiesByInvocation = new HashMap<>();
+        final Map<String, Set<Integer>> aritiesByLocalName = new HashMap<>();
         private @Nullable Map<String, Set<String>> prefixesByNamespace;
 
-        void index(final String path, final Set<String> invocations) {
-            for (final String key : invocations) {
+        void index(final String path, final Map<String, Set<Integer>> invocations) {
+            for (final Map.Entry<String, Set<Integer>> invocation : invocations.entrySet()) {
+                final String key = invocation.getKey();
+                final String localName = XQueryCalls.localName(key);
                 testPathsByInvocation.computeIfAbsent(key, k -> new LinkedHashSet<>()).add(path);
-                testPathsByLocalName.computeIfAbsent(XQueryCalls.localName(key), k -> new LinkedHashSet<>()).add(path);
+                testPathsByLocalName.computeIfAbsent(localName, k -> new LinkedHashSet<>()).add(path);
+                aritiesByInvocation.computeIfAbsent(key, k -> new HashSet<>()).addAll(invocation.getValue());
+                aritiesByLocalName.computeIfAbsent(localName, k -> new HashSet<>()).addAll(invocation.getValue());
             }
         }
 
-        Set<ResolvedName> resolveNames(final ClassInfo info) {
-            final Set<ResolvedName> resolved = new LinkedHashSet<>();
+        /** @return each name the class registers, with the arities registered for it */
+        Map<ResolvedName, Arities> resolveNames(final ClassInfo info) {
+            final Map<ResolvedName, Arities> resolved = new LinkedHashMap<>();
             for (final SignatureName name : info.names) {
                 final ResolvedName r = resolve(name);
                 if (r != null) {
-                    resolved.add(r);
+                    resolved.computeIfAbsent(r, k -> new Arities()).add(name.arities, this);
                 }
             }
             return resolved;
+        }
+
+        List<String> testKinds(final Set<String> paths) {
+            final Set<String> kinds = new HashSet<>();
+            for (final String path : paths) {
+                kinds.add(testKind(path));
+            }
+            final List<String> ordered = new ArrayList<>();
+            for (final String kind : TestKind.ORDER) {
+                if (kinds.contains(kind)) {
+                    ordered.add(kind);
+                }
+            }
+            return ordered;
+        }
+
+        Set<Integer> matchingArities(final ResolvedName name) {
+            if (name.namespaceUri == null) {
+                return aritiesByLocalName.getOrDefault(name.localName, Collections.emptySet());
+            }
+            final Set<Integer> arities = new HashSet<>(aritiesByInvocation.getOrDefault(
+                    XQueryCalls.qualifiedKey(name.namespaceUri, name.localName), Collections.emptySet()));
+            for (final String prefix : prefixesByNamespace().getOrDefault(name.namespaceUri, Collections.emptySet())) {
+                arities.addAll(aritiesByInvocation.getOrDefault(
+                        XQueryCalls.undeclaredPrefixKey(prefix, name.localName), Collections.emptySet()));
+            }
+            return arities;
         }
 
         @Nullable ResolvedName resolve(final SignatureName name) {
@@ -612,7 +820,7 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
                 }
                 for (final Map<String, ClassInfo> classes : implementationsByPath.values()) {
                     for (final ClassInfo info : classes.values()) {
-                        for (final ResolvedName name : resolveNames(info)) {
+                        for (final ResolvedName name : resolveNames(info).keySet()) {
                             if (name.namespaceUri != null && name.prefix != null && !name.prefix.isEmpty()) {
                                 prefixes.computeIfAbsent(name.namespaceUri, ns -> new LinkedHashSet<>()).add(name.prefix);
                             }
@@ -634,14 +842,79 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
         }
     }
 
-    /** The name a function registers, and the helper it registered it through, if any. */
+    /** The name a function registers, the helper it registered it through, if any, and its arity. */
     private static class SignatureName {
         final Ref ref;
         final @Nullable String helperKey;
+        final @Nullable ArityRef arities;
 
-        SignatureName(final Ref ref, final @Nullable String helperKey) {
+        SignatureName(final Ref ref, final @Nullable String helperKey, final @Nullable ArityRef arities) {
             this.ref = ref;
             this.helperKey = helperKey;
+            this.arities = arities;
+        }
+    }
+
+    /** The parameter count(s) of a signature, unresolved, and whether it is variadic. */
+    private static class ArityRef {
+        final Ref lengths;
+        final boolean variadic;
+
+        ArityRef(final Ref lengths, final boolean variadic) {
+            this.lengths = lengths;
+            this.variadic = variadic;
+        }
+    }
+
+    /** The arities registered for one function name, across all its signatures. */
+    static class Arities {
+        final Set<Integer> fixed = new java.util.TreeSet<>();
+        /** The minimum argument counts of variadic signatures. */
+        final Set<Integer> variadic = new java.util.TreeSet<>();
+        boolean unknown;
+
+        void add(final @Nullable ArityRef ref, final Acc acc) {
+            final List<Integer> lengths = ref != null ? ref.lengths.resolveArities(acc, 0) : null;
+            if (lengths == null) {
+                unknown = true;
+            } else {
+                (ref.variadic ? variadic : fixed).addAll(lengths);
+            }
+        }
+
+        /** @return e.g. {@code "1, 2, 3+"}, with {@code ?} for a signature whose arity is unknown */
+        String format() {
+            final List<String> parts = new ArrayList<>();
+            for (final Integer arity : fixed) {
+                parts.add(String.valueOf(arity));
+            }
+            for (final Integer arity : variadic) {
+                parts.add(arity + "+");
+            }
+            if (unknown) {
+                parts.add("?");
+            }
+            return String.join(", ", parts);
+        }
+
+        /** @return the known arities no invocation in {@code invoked} matches, formatted as {@link #format()} */
+        String formatUntested(final Set<Integer> invoked) {
+            final List<String> parts = new ArrayList<>();
+            for (final Integer arity : fixed) {
+                if (!invoked.contains(arity)) {
+                    parts.add(String.valueOf(arity));
+                }
+            }
+            for (final Integer arity : variadic) {
+                boolean covered = false;
+                for (final Integer n : invoked) {
+                    covered |= n >= arity;
+                }
+                if (!covered) {
+                    parts.add(arity + "+");
+                }
+            }
+            return String.join(", ", parts);
         }
     }
 
@@ -658,6 +931,11 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
         static final int MAX_DEPTH = 16;
 
         abstract @Nullable ResolvedName resolve(Acc acc, int depth);
+
+        /** @return the array length(s) this refers to, or null if it is not a (known) array */
+        @Nullable List<Integer> resolveArities(final Acc acc, final int depth) {
+            return null;
+        }
 
         static @Nullable String resolveString(final @Nullable Ref ref, final Acc acc, final int depth) {
             final ResolvedName r = ref != null ? ref.resolve(acc, depth + 1) : null;
@@ -689,6 +967,58 @@ public class XQueryDynamicInvocationCoverage extends ScanningRecipe<XQueryDynami
         @Nullable ResolvedName resolve(final Acc acc, final int depth) {
             final Ref target = acc.constants.get(key);
             return target != null && depth < MAX_DEPTH ? target.resolve(acc, depth + 1) : null;
+        }
+
+        @Override
+        @Nullable List<Integer> resolveArities(final Acc acc, final int depth) {
+            final Ref target = acc.constants.get(key);
+            return target != null && depth < MAX_DEPTH ? target.resolveArities(acc, depth + 1) : null;
+        }
+    }
+
+    /** The length of a one-dimensional array. */
+    private static class LengthRef extends Ref {
+        final int length;
+
+        LengthRef(final int length) {
+            this.length = length;
+        }
+
+        @Override
+        @Nullable ResolvedName resolve(final Acc acc, final int depth) {
+            return null;
+        }
+
+        @Override
+        List<Integer> resolveArities(final Acc acc, final int depth) {
+            return Collections.singletonList(length);
+        }
+    }
+
+    /** The rows of a two-dimensional array, one arity each. */
+    private static class ArraysRef extends Ref {
+        final List<@Nullable Ref> rows;
+
+        ArraysRef(final List<@Nullable Ref> rows) {
+            this.rows = rows;
+        }
+
+        @Override
+        @Nullable ResolvedName resolve(final Acc acc, final int depth) {
+            return null;
+        }
+
+        @Override
+        @Nullable List<Integer> resolveArities(final Acc acc, final int depth) {
+            final List<Integer> arities = new ArrayList<>();
+            for (final Ref row : rows) {
+                final List<Integer> lengths = row != null && depth < MAX_DEPTH ? row.resolveArities(acc, depth + 1) : null;
+                if (lengths == null) {
+                    return null;
+                }
+                arities.addAll(lengths);
+            }
+            return arities;
         }
     }
 

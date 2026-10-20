@@ -62,20 +62,55 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
             }
             """;
 
+    private static final String SEQUENCE_TYPE_STUB = """
+            package org.exist.xquery.value;
+            public class SequenceType {
+            }
+            """;
+
+    private static final String FUNCTION_PARAMETER_SEQUENCE_TYPE_STUB = """
+            package org.exist.xquery.value;
+            public class FunctionParameterSequenceType extends SequenceType {
+            }
+            """;
+
     private static final String FUNCTION_SIGNATURE_STUB = """
             package org.exist.xquery;
             import org.exist.dom.QName;
+            import org.exist.xquery.value.SequenceType;
             public class FunctionSignature {
+                public static final SequenceType[] NO_ARGS = new SequenceType[0];
                 public FunctionSignature(QName name, String description) {}
+                public FunctionSignature(QName name, String description, SequenceType[] arguments, SequenceType returnType) {}
+                public FunctionSignature(QName name, String description, SequenceType[] arguments, SequenceType returnType, boolean variadic) {}
             }
             """;
 
     private static final String FUNCTION_DSL_STUB = """
             package org.exist.xquery;
             import org.exist.dom.QName;
+            import org.exist.xquery.value.FunctionParameterSequenceType;
+            import org.exist.xquery.value.SequenceType;
             public class FunctionDSL {
                 public static FunctionSignature functionSignature(QName name, String description) {
                     return new FunctionSignature(name, description);
+                }
+                public static FunctionSignature functionSignature(QName name, String description, SequenceType returnType,
+                        FunctionParameterSequenceType... paramTypes) {
+                    return null;
+                }
+                public static FunctionSignature[] functionSignatures(QName name, String description, SequenceType returnType,
+                        FunctionParameterSequenceType[][] variableParamTypes) {
+                    return null;
+                }
+                public static FunctionParameterSequenceType[][] arities(FunctionParameterSequenceType[]... variableParamTypes) {
+                    return variableParamTypes;
+                }
+                public static FunctionParameterSequenceType[] arity(FunctionParameterSequenceType... paramTypes) {
+                    return paramTypes;
+                }
+                public static FunctionParameterSequenceType param(String name) {
+                    return null;
                 }
             }
             """;
@@ -105,6 +140,8 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
 
     private static SourceSpecs[] with(final SourceSpecs... specs) {
         final SourceSpecs[] stubs = {
+                java(SEQUENCE_TYPE_STUB),
+                java(FUNCTION_PARAMETER_SEQUENCE_TYPE_STUB),
                 java(FUNCTION_STUB),
                 java(BASIC_FUNCTION_STUB),
                 java(USER_DEFINED_FUNCTION_STUB),
@@ -127,7 +164,10 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                 import org.exist.xquery.Function;
                 import org.exist.xquery.FunctionSignature;
                 import org.exist.xquery.functions.util.UtilModule;
+                import org.exist.xquery.value.FunctionParameterSequenceType;
+                import org.exist.xquery.value.SequenceType;
                 import org.exist.dom.QName;
+                import static org.exist.xquery.FunctionDSL.*;
                 public class F extends BasicFunction {
                 %s
                 }
@@ -140,9 +180,23 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                 + "new QName(\"" + localName + "\", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), \"desc\");");
     }
 
+    /**
+     * A row for {@code p.F}, registered via the two-argument {@code FunctionSignature} stub, whose
+     * arity is unknown; the test kinds follow from the matching paths.
+     */
     private static XQueryDynamicInvocationCoverageTable.Row row(final String localName, final boolean hit,
             final String matchingPaths) {
-        return new XQueryDynamicInvocationCoverageTable.Row("p/F.java", "p.F", UTIL_NS, localName, hit, matchingPaths);
+        return row("p/F.java", "p.F", UTIL_NS, localName, hit, matchingPaths);
+    }
+
+    private static XQueryDynamicInvocationCoverageTable.Row row(final String sourcePath, final String className,
+            final String namespaceUri, final String localName, final boolean hit, final String matchingPaths) {
+        final java.util.Set<String> kinds = new java.util.LinkedHashSet<>();
+        for (final String path : matchingPaths.isEmpty() ? new String[0] : matchingPaths.split("; ")) {
+            kinds.add(XQueryDynamicInvocationCoverage.testKind(path));
+        }
+        return new XQueryDynamicInvocationCoverageTable.Row(sourcePath, className, namespaceUri, localName, hit,
+                String.join(", ", kinds), "?", "", matchingPaths);
     }
 
     private static void expect(final RecipeSpec spec, final XQueryDynamicInvocationCoverageTable.Row... rows) {
@@ -310,7 +364,7 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
         rewriteRun(
                 spec -> spec.dataTable(XQueryDynamicInvocationCoverageTable.Row.class, rows ->
                         assertThat(rows).containsExactly(
-                                new XQueryDynamicInvocationCoverageTable.Row(
+                                row(
                                         "org/exist/xquery/functions/util/AvailableSystemProperties.java",
                                         "org.exist.xquery.functions.util.AvailableSystemProperties",
                                         UTIL_NS,
@@ -463,8 +517,7 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
         rewriteRun(
                 spec -> spec.dataTable(XQueryDynamicInvocationCoverageTable.Row.class, rows ->
                         assertThat(rows).containsExactly(
-                                new XQueryDynamicInvocationCoverageTable.Row("p/F.java", "p.F", "", "mystery",
-                                        true, "src/test/xquery/t.xql"))),
+                                row("p/F.java", "p.F", "", "mystery", true, "src/test/xquery/t.xql"))),
                 with(
                         function("""
                                 static String ns() { return "urn:computed"; }
@@ -681,6 +734,120 @@ class XQueryDynamicInvocationCoverageTest implements RewriteTest {
                                 """,
                                 s -> s.path("src/test/java/p/FTest.java")
                         )
+                )
+        );
+    }
+
+    @Test
+    void reportsDeclaredAndUntestedArities() {
+        rewriteRun(
+                spec -> spec.dataTable(XQueryDynamicInvocationCoverageTable.Row.class, rows ->
+                        assertThat(rows)
+                                .extracting(XQueryDynamicInvocationCoverageTable.Row::getLocalName,
+                                        XQueryDynamicInvocationCoverageTable.Row::getDeclaredArities,
+                                        XQueryDynamicInvocationCoverageTable.Row::getUntestedArities)
+                                .containsExactly(
+                                        Tuple.tuple("inline", "0, 2", "0"),
+                                        Tuple.tuple("variadic", "1+", ""),
+                                        Tuple.tuple("arrow", "2", ""),
+                                        Tuple.tuple("looked-up", "1", ""),
+                                        Tuple.tuple("dsl", "1, 3", "3"))),
+                with(
+                        function("""
+                                static final SequenceType[] TWO = { new SequenceType(), new SequenceType() };
+                                static final FunctionSignature[] signatures = {
+                                    new FunctionSignature(new QName("inline", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "", FunctionSignature.NO_ARGS, null),
+                                    new FunctionSignature(new QName("inline", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "", TWO, null),
+                                    new FunctionSignature(new QName("variadic", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "",
+                                            new SequenceType[] { new SequenceType() }, null, true),
+                                    new FunctionSignature(new QName("arrow", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "",
+                                            new SequenceType[] { new SequenceType(), new SequenceType() }, null),
+                                    functionSignature(new QName("looked-up", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "", null, param("a"))
+                                };
+                                static final FunctionSignature[] DSL = functionSignatures(
+                                        new QName("dsl", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "", null,
+                                        arities(arity(param("a")), arity(param("a"), param("b"), param("c"))));
+                                """),
+                        text("""
+                                util:inline('a', ('b', 'c')),
+                                util:variadic(1, 2, 3),
+                                util:dsl(map { 'a': 1, 'b': 2 }),
+                                'x' => util:arrow("y"),
+                                function-lookup(xs:QName('util:looked-up'), 1)
+                                """, s -> s.path("src/test/xquery/t.xql"))
+                )
+        );
+    }
+
+    @Test
+    void classifiesTestKinds() {
+        rewriteRun(
+                spec -> spec.dataTable(XQueryDynamicInvocationCoverageTable.Row.class, rows ->
+                        assertThat(rows)
+                                .extracting(XQueryDynamicInvocationCoverageTable.Row::getLocalName,
+                                        XQueryDynamicInvocationCoverageTable.Row::getTestKinds)
+                                .containsExactly(
+                                        Tuple.tuple("in-unit-and-it", "unit, integration"),
+                                        Tuple.tuple("in-it", "integration"),
+                                        Tuple.tuple("in-bats", "container"),
+                                        Tuple.tuple("in-runner", "runner"))),
+                with(
+                        function("""
+                                static final FunctionSignature[] signatures = {
+                                    new FunctionSignature(new QName("in-unit-and-it", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), ""),
+                                    new FunctionSignature(new QName("in-it", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), ""),
+                                    new FunctionSignature(new QName("in-bats", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), ""),
+                                    new FunctionSignature(new QName("in-runner", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "")
+                                };
+                                """),
+                        testJava("src/test/java/p/FTest.java", "util:in-unit-and-it()"),
+                        java("""
+                                package p;
+                                public class ConnectionIT {
+                                    String q = "util:in-unit-and-it(), util:in-it()";
+                                }
+                                """, s -> s.path("src/test/java/p/ConnectionIT.java")),
+                        text("run curl \"...?_query=util:in-bats()\"", s -> s.path("exist-docker/src/test/bats/01.bats")),
+                        text("util:in-runner()", s -> s.path("exist-core/src/main/resources/org/exist/xquery/lib/test.xq"))
+                )
+        );
+    }
+
+    @Test
+    void onlyCountsXqSuiteCodeReachableFromTests() {
+        rewriteRun(
+                spec -> spec.dataTable(XQueryDynamicInvocationCoverageTable.Row.class, rows ->
+                        assertThat(rows)
+                                .extracting(XQueryDynamicInvocationCoverageTable.Row::getLocalName,
+                                        XQueryDynamicInvocationCoverageTable.Row::isDynamicallyInvokedInTests)
+                                .containsExactly(
+                                        Tuple.tuple("via-helper", true),
+                                        Tuple.tuple("in-setup", true),
+                                        Tuple.tuple("in-resource", true),
+                                        Tuple.tuple("in-variable", true),
+                                        Tuple.tuple("in-dead-helper", false))),
+                with(
+                        function("""
+                                static final FunctionSignature[] signatures = {
+                                    new FunctionSignature(new QName("via-helper", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), ""),
+                                    new FunctionSignature(new QName("in-setup", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), ""),
+                                    new FunctionSignature(new QName("in-resource", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), ""),
+                                    new FunctionSignature(new QName("in-variable", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), ""),
+                                    new FunctionSignature(new QName("in-dead-helper", UtilModule.NAMESPACE_URI, UtilModule.PREFIX), "")
+                                };
+                                """),
+                        text("""
+                                module namespace t = "http://exist-db.org/xquery/test/reach";
+                                declare namespace test = "http://exist-db.org/xquery/xqsuite";
+                                declare namespace rest = "http://exquery.org/ns/restxq";
+                                declare variable $t:v := util:in-variable();
+                                declare %test:setUp function t:setup() { util:in-setup() };
+                                declare %test:assertTrue function t:test() { t:helper#0() };
+                                declare %private function t:helper() { t:deeper() };
+                                declare function t:deeper() { util:via-helper() };
+                                declare %rest:GET %rest:path("/x") function t:resource() { util:in-resource() };
+                                declare function t:dead() { util:in-dead-helper() };
+                                """, s -> s.path("src/test/xquery/reach.xqm"))
                 )
         );
     }

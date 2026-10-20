@@ -28,7 +28,7 @@ It then scans the code that eXist-db's test runners actually execute (the `@XQSu
 
 | Source | What is scanned |
 |---|---|
-| XQuery files (`.xq`, `.xql`, `.xqm`, `.xquery`, `.xqy`, `.xqws`) in test source sets — XQSuite modules | the whole module, minus `%test:pending` functions, which XQSuite never runs |
+| XQuery files (`.xq`, `.xql`, `.xqm`, `.xquery`, `.xqy`, `.xqws`) in test source sets — XQSuite modules | in a module with XQSuite annotations, only the code that runs: the prolog (imports, variables), the test functions (`%test:assert*`, `%test:setUp`, ...; `%test:pending` ones never run), functions with other prefixed annotations such as RESTXQ's `%rest:GET`, and the module functions they transitively call. Other XQuery files are scanned whole |
 | XML `<TestSet>` files in test source sets (run by `XMLTestRunner`/`test.xq`) | each test's `<code>` and `<xpath>`, plus the set's `<imports>`, `<variable>` and `<functions>` prolog; tests with an `@ignore` other than `"no"` are skipped, as are `<task>`, `<description>` and `<expected>`. Other XML files are data fixtures and are ignored |
 | Java test classes | string literals, with `"a" + "b"` concatenations folded |
 | The runner libraries `xqsuite/xqsuite.xql` and `test.xq` | the whole file, since it runs with every suite |
@@ -47,10 +47,29 @@ matches on **namespace and local name**, so `fn:contains`, `ngram:contains` and 
 are told apart; only a function whose namespace could not be resolved falls back to matching on
 its local name alone (its `Namespace URI` column is empty).
 
-The resulting `XQueryDynamicInvocationCoverageTable` data table reports whether each function is
-actually exercised by a test. It's a best-effort heuristic: it does not check arity, and it can't
-tell whether a call it finds is reached at run time. Treat a `false` result as a real candidate gap
-and a `true` result as reasonably trustworthy.
+It also records each call's **arity**: the number of top-level arguments (one more after a `=>`
+arrow), a reference's `#n`, or `function-lookup(..., n)`; and the arities each function's
+signatures declare: the length of the `SequenceType[]` passed to `new FunctionSignature(...)`
+(inline, `FunctionSignature.NO_ARGS` or another array constant, `n+` if `variadic`), or the
+parameters of FunctionDSL's `functionSignature(...)`/`functionSignatures(..., arities(arity(...), ...))`.
+
+The resulting `XQueryDynamicInvocationCoverageTable` data table has one row per function name:
+
+| Column | Meaning |
+|---|---|
+| Source path, Class name | the `Function` subclass |
+| QName namespace URI, QName local name | the name it registers; the namespace is empty if unresolved |
+| Dynamically invoked in tests | whether any executed test code calls it — the corrected coverage signal for its `eval()` |
+| Test kinds | how CI runs the matching tests: `unit` (Surefire, including the XQSuite/XML suites), `integration` (Failsafe `IT*`/`*IT`/`*ITCase` classes, a separate CI job), `container` (BATS against the Docker image), `runner` (the test runner libraries — executed, but not asserted on) |
+| Declared arities | e.g. `1, 2`, or `1+` if variadic; `?` for a signature whose arity couldn't be resolved |
+| Untested arities | declared arities no matching call uses — partial coverage of an `eval()` that switches on its arguments |
+| Matching test paths | where the calls are |
+
+It's a best-effort heuristic: it can't tell whether a call it finds in reachable code actually
+runs (a branch not taken, a test that fails before it), and it can't follow calls across XQuery
+modules. Treat a `false` result as a real candidate gap and a `true` result as reasonably
+trustworthy; a function covered only by `integration`, `container` or `runner` tests deserves a
+closer look.
 
 ## Building
 
