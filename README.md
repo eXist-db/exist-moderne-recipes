@@ -88,7 +88,7 @@ mod run /path/to/exist --recipe org.exist.moderne.XQueryDynamicInvocationCoverag
 
 **Important:** `mod run` appears to cache results by recipe GAV rather than jar content — use a
 fresh version on every change before reinstalling (e.g.
-`./gradlew publishToMavenLocal -PreleaseVersion=1.0.1-dev3`), or `mod run` will silently return
+`./gradlew publishToMavenLocal -PreleaseVersion=2.0.0-dev3`), or `mod run` will silently return
 stale results from a previous run. Untagged builds default to a `-SNAPSHOT` version.
 
 Read the resulting data table via
