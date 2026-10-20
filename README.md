@@ -10,22 +10,66 @@ installed into CI (or a local `mod` CLI) without vendoring the source into `exis
 ### `org.exist.moderne.XQueryDynamicInvocationCoverage`
 
 Corrects a systematic blind spot in Moderne Prethink's `test-gaps.csv` for this codebase:
-`BasicFunction#eval()` overrides (i.e. essentially every builtin XQuery function implementation)
-are dispatched by QName through the query engine at runtime, not called directly from Java, so a
-static call-graph analysis can never see the edge from a test to `eval()` and always reports it
-as untested.
+`eval()` overrides of `org.exist.xquery.Function` subclasses (including `BasicFunction`, i.e.
+essentially every builtin XQuery function implementation) are dispatched by QName through the
+query engine at runtime, not called directly from Java, so a static call-graph analysis can never
+see the edge from a test to `eval()` and always reports it as untested.
 
-This recipe cross-references each function's QName local name (from `new QName(...)` calls, or
-the `FunctionDSL.functionSignature(name, ...)` helper pattern, including through a same-class
-`static final String` constant) against string literals in Java test sources and raw text in
-test resources (XQSuite `.xql`/`.xqm` modules, XML fixtures), and emits an
-`XQueryDynamicInvocationCoverageTable` data table reporting whether each function is actually
-exercised by a test.
+For each function class (excluding `UserDefinedFunction`), the recipe takes the QName(s)
+registered by its `FunctionSignature`: the first argument to `new FunctionSignature(...)` or a
+`functionSignature(...)`/`functionSignatures(...)` helper. That argument may be a
+`new QName(local, NAMESPACE_URI, PREFIX)`, a `String`/`QName` constant declared anywhere in the
+codebase, or a bare local name passed to a module helper such as `UtilModule.functionSignature`,
+whose own `new QName(name, NAMESPACE_URI, PREFIX)` supplies the namespace. QNames built for other
+purposes (e.g. result elements inside `eval()`) are ignored.
 
-It's a best-effort heuristic (matches on QName local name only, not the full namespace-qualified
-name), so it can be fooled by two different modules sharing a local name. Treat a `false` result
-as a real candidate gap; treat a `true` result as reasonably trustworthy given how specific most
-eXist-db function names are.
+It then scans the code that eXist-db's test runners actually execute (the `@XQSuite` suites run by
+`XQSuiteTestEngine`):
+
+| Source | What is scanned |
+|---|---|
+| XQuery files (`.xq`, `.xql`, `.xqm`, `.xquery`, `.xqy`, `.xqws`) in test source sets — XQSuite modules | in a module with XQSuite annotations, only the code that runs: the prolog (imports, variables), the test functions (`%test:assert*`, `%test:setUp`, ...; `%test:pending` ones never run), functions with other prefixed annotations such as RESTXQ's `%rest:GET`, and the module functions they transitively call. Other XQuery files are scanned whole |
+| XML `<TestSet>` files in test source sets (run by `XMLTestRunner`/`test.xq`) | each test's `<code>` and `<xpath>`, plus the set's `<imports>`, `<variable>` and `<functions>` prolog; tests with an `@ignore` other than `"no"` are skipped, as are `<task>`, `<description>` and `<expected>`. Other XML files are data fixtures and are ignored |
+| Java test classes | string literals, with `"a" + "b"` concatenations folded |
+| The runner libraries `xqsuite/xqsuite.xql` and `test.xq` | the whole file, since it runs with every suite |
+| BATS container tests (`.bats`) in test source sets, run by the `ci-container` workflow | the whole file |
+| REST API `<query xmlns="http://exist.sourceforge.net/NS/exist">` request bodies in test source sets | the `<text>` |
+
+Test source sets are `src/test*/`, `src/*Test/`, or a top-level `test/`/`tests/` directory.
+
+In each, it finds calls (`prefix:name(`, `name (`), function references (`prefix:name#1`) and
+`xs:QName('prefix:name')` lookups, ignoring XQuery `(: comments :)`, annotations and
+`declare function` declarations. A prefix resolves to a namespace through the text's own
+`declare namespace`/`import module namespace`/`module namespace` declarations or, failing that, the
+statically bound prefixes: `fn`, `map`, `array`, `math`, `xs`, and each module's default `PREFIX`.
+An unprefixed call is in the default function namespace (`fn:` unless redeclared). A function then
+matches on **namespace and local name**, so `fn:contains`, `ngram:contains` and `range:contains`
+are told apart; only a function whose namespace could not be resolved falls back to matching on
+its local name alone (its `Namespace URI` column is empty).
+
+It also records each call's **arity**: the number of top-level arguments (one more after a `=>`
+arrow), a reference's `#n`, or `function-lookup(..., n)`; and the arities each function's
+signatures declare: the length of the `SequenceType[]` passed to `new FunctionSignature(...)`
+(inline, `FunctionSignature.NO_ARGS` or another array constant, `n+` if `variadic`), or the
+parameters of FunctionDSL's `functionSignature(...)`/`functionSignatures(..., arities(arity(...), ...))`.
+
+The resulting `XQueryDynamicInvocationCoverageTable` data table has one row per function name:
+
+| Column | Meaning |
+|---|---|
+| Source path, Class name | the `Function` subclass |
+| QName namespace URI, QName local name | the name it registers; the namespace is empty if unresolved |
+| Dynamically invoked in tests | whether any executed test code calls it — the corrected coverage signal for its `eval()` |
+| Test kinds | how CI runs the matching tests: `unit` (Surefire, including the XQSuite/XML suites), `integration` (Failsafe `IT*`/`*IT`/`*ITCase` classes, a separate CI job), `container` (BATS against the Docker image), `runner` (the test runner libraries — executed, but not asserted on) |
+| Declared arities | e.g. `1, 2`, or `1+` if variadic; `?` for a signature whose arity couldn't be resolved |
+| Untested arities | declared arities no matching call uses — partial coverage of an `eval()` that switches on its arguments |
+| Matching test paths | where the calls are |
+
+It's a best-effort heuristic: it can't tell whether a call it finds in reachable code actually
+runs (a branch not taken, a test that fails before it), and it can't follow calls across XQuery
+modules. Treat a `false` result as a real candidate gap and a `true` result as reasonably
+trustworthy; a function covered only by `integration`, `container` or `runner` tests deserves a
+closer look.
 
 ## Building
 
@@ -44,7 +88,7 @@ mod run /path/to/exist --recipe org.exist.moderne.XQueryDynamicInvocationCoverag
 
 **Important:** `mod run` appears to cache results by recipe GAV rather than jar content — use a
 fresh version on every change before reinstalling (e.g.
-`./gradlew publishToMavenLocal -PreleaseVersion=1.0.1-dev3`), or `mod run` will silently return
+`./gradlew publishToMavenLocal -PreleaseVersion=2.0.0-dev3`), or `mod run` will silently return
 stale results from a previous run. Untagged builds default to a `-SNAPSHOT` version.
 
 Read the resulting data table via
