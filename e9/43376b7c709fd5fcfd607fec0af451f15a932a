@@ -1,0 +1,31 @@
+README.md
+  s_06b0e517581901::t_c70b55f085ebea 30-52
+src/main/java/org/exist/moderne/JacocoReports.java
+  s_06b0e517581901::t_b98f683fae51ca 1-184
+src/main/java/org/exist/moderne/MethodSignatures.java
+  s_06b0e517581901::t_1d95158ec38d2a 1-165
+src/main/java/org/exist/moderne/TestGapsCoverage.java
+  s_06b0e517581901::t_39b24092900168 1-273
+src/test/java/org/exist/moderne/JacocoReportsTest.java
+  s_06b0e517581901::t_4501e49f128637 1-141
+src/test/java/org/exist/moderne/MethodSignaturesTest.java
+  s_06b0e517581901::t_608ea69cbd0f57 1-123
+src/test/java/org/exist/moderne/TestGapsCoverageTest.java
+  s_06b0e517581901::t_3acef37c1eb34d 1-248
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e943376b7c709fd5fcfd607fec0af451f15a932a",
+  "prompts": {},
+  "sessions": {
+    "s_06b0e517581901": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd4189ea-1ea5-4026-bf61-26eb5d055e24",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
