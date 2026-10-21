@@ -31,7 +31,8 @@ import org.openrewrite.TreeVisitor;
 import org.openrewrite.text.PlainText;
 import org.openrewrite.text.PlainTextVisitor;
 
-import java.nio.file.Path;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -49,8 +50,9 @@ import java.util.logging.Logger;
  * ignores the new columns.
  * <p>
  * {@code Coverage state} is {@code covered}, {@code partial} or {@code uncovered} for a matched method,
- * {@code no-coverage-data} if the module of the row has no report (its tests did not run), and
- * {@code unmatched} if it has a report but no method matched.
+ * {@code no-coverage-data} if neither the module of the row nor any other report holds its class (the tests
+ * did not run), and {@code unmatched} if there is a report for the module or the class but no method matched. {@code Adjusted risk score} scales Prethink's
+ * {@code Risk score} by the share of the method's instructions that no test reaches.
  */
 @Value
 @EqualsAndHashCode(callSuper = false)
@@ -59,10 +61,7 @@ public class TestGapsCoverage extends Recipe {
     private static final Logger LOG = Logger.getLogger(TestGapsCoverage.class.getName());
 
     static final List<String> COVERAGE_COLUMNS = Arrays.asList("Coverage state", "Instructions covered",
-            "Instructions missed", "Branches covered", "Branches missed", "Match tier");
-
-    private static final List<String> NONE_NO_DATA = Arrays.asList("no-coverage-data", "", "", "", "", "none");
-    private static final List<String> NONE_UNMATCHED = Arrays.asList("unmatched", "", "", "", "", "none");
+            "Instructions missed", "Branches covered", "Branches missed", "Match tier", "Adjusted risk score");
 
     @Getter
     final String displayName = "Add JaCoCo coverage to Prethink's test gaps";
@@ -89,14 +88,23 @@ public class TestGapsCoverage extends Recipe {
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
         final String path = testGapsPath == null ? ".moderne/context/test-gaps.csv" : testGapsPath;
-        final JacocoReports reports = JacocoReports.read(Paths.get(jacocoReportsDir));
-        if (reports.isEmpty()) {
-            LOG.warning("No JaCoCo reports found in " + jacocoReportsDir + "; no coverage applied to " + path);
-        }
         return new PlainTextVisitor<ExecutionContext>() {
+            private JacocoReports reports;
+
             @Override
             public PlainText visitText(final PlainText text, final ExecutionContext ctx) {
-                if (reports.isEmpty() || !text.getSourcePath().toString().replace('\\', '/').equals(path)) {
+                if (!text.getSourcePath().toString().replace('\\', '/').equals(path)) {
+                    return text;
+                }
+                // read on first use: the reports of a large build are only worth parsing if the CSV is there
+                if (reports == null) {
+                    reports = JacocoReports.read(Paths.get(jacocoReportsDir));
+                    if (reports.isEmpty()) {
+                        LOG.warning("No JaCoCo reports found in " + Paths.get(jacocoReportsDir).toAbsolutePath()
+                                + "; no coverage applied to " + path);
+                    }
+                }
+                if (reports.isEmpty()) {
                     return text;
                 }
                 final String patched = patch(text.getText(), reports);
@@ -112,12 +120,18 @@ public class TestGapsCoverage extends Recipe {
             return csv;
         }
         final Record header = records.get(0);
-        final List<String> names = header.values();
+        final List<String> names = new ArrayList<>(header.values());
+        if (!names.isEmpty() && names.get(0).startsWith("\uFEFF")) {
+            names.set(0, names.get(0).substring(1));
+        }
         final int pathColumn = names.indexOf("Source path");
         final int signatureColumn = names.indexOf("Method signature");
+        final int riskColumn = names.indexOf("Risk score");
         if (pathColumn < 0 || signatureColumn < 0) {
+            LOG.warning("No coverage applied: the CSV has no 'Source path' and 'Method signature' columns");
             return csv;
         }
+        final int needed = Math.max(Math.max(pathColumn, signatureColumn), riskColumn) + 1;
         int original = names.size();
         while (original > 0 && COVERAGE_COLUMNS.contains(names.get(original - 1))) {
             original--;
@@ -125,9 +139,15 @@ public class TestGapsCoverage extends Recipe {
         final StringBuilder out = new StringBuilder();
         for (int i = 0; i < records.size(); i++) {
             final Record r = records.get(i);
+            if (i > 0 && r.values().size() < needed) {
+                // a blank or short row has nothing to look up
+                out.append(r.text()).append(r.terminator());
+                continue;
+            }
             out.append(r.text(), 0, r.endOfColumn(original));
             final List<String> added = i == 0 ? COVERAGE_COLUMNS
-                    : coverage(r.values().get(pathColumn), r.values().get(signatureColumn), reports);
+                    : coverage(r.values().get(pathColumn), r.values().get(signatureColumn),
+                    riskColumn < 0 ? "" : r.values().get(riskColumn), reports);
             for (final String value : added) {
                 out.append(',').append(quote(value));
             }
@@ -136,49 +156,91 @@ public class TestGapsCoverage extends Recipe {
         return out.toString();
     }
 
-    private static List<String> coverage(final String sourcePath, final String signature, final JacocoReports reports) {
-        final String module = module(sourcePath);
-        if (!reports.hasModule(module)) {
-            return NONE_NO_DATA;
-        }
+    private static List<String> coverage(final String sourcePath, final String signature, final String risk,
+                                         final JacocoReports reports) {
+        final boolean moduleHasReport = reports.hasModule(module(sourcePath));
         final MethodSignatures.Erased method = MethodSignatures.parse(signature);
-        if (method == null) {
-            return NONE_UNMATCHED;
+        final List<List<JacocoReports.Method>> inReports = method == null ? new ArrayList<>()
+                : reports.methodsInAnyReport(method.className(), method.name());
+        Match best = null;
+        for (final List<JacocoReports.Method> candidates : inReports) {
+            final Match match = match(candidates, method);
+            // with merged reports a method is in several: the best coverage wins, an exact match over a guess
+            if (match != null && (best == null || match.isBetterThan(best))) {
+                best = match;
+            }
         }
-        final List<JacocoReports.Method> candidates = reports.methods(module, method.className(), method.name());
-        final int n = method.parameters().size();
-        JacocoReports.Method match = null;
-        String tier = "exact";
+        if (best == null) {
+            return Arrays.asList(moduleHasReport || !inReports.isEmpty() ? "unmatched" : "no-coverage-data",
+                    "", "", "", "", "none", risk);
+        }
+        final JacocoReports.Counter i = best.method.instructions();
+        final String state = i.covered() == 0 ? "uncovered" : i.missed() == 0 ? "covered" : "partial";
+        final JacocoReports.Counter b = best.method.branches();
+        return Arrays.asList(state, String.valueOf(i.covered()), String.valueOf(i.missed()),
+                b == null ? "" : String.valueOf(b.covered()), b == null ? "" : String.valueOf(b.missed()), best.tier,
+                adjustedRisk(risk, i));
+    }
+
+    /** The method of one report that a Prethink method is, or null. */
+    private static Match match(final List<JacocoReports.Method> candidates, final MethodSignatures.Erased method) {
+        final List<String> parameters = method.parameters();
+        final boolean constructor = method.name().equals("<init>");
         // k leading descriptor parameters are hidden: the outer instance of an inner class, (String, int) of an enum
-        for (int k = 0; k <= 2 && match == null; k++) {
+        for (int k = 0; k <= (constructor ? 2 : 0); k++) {
             JacocoReports.Method best = null;
             for (final JacocoReports.Method c : candidates) {
-                if (c.parameters().size() >= k && c.parameters().subList(k, c.parameters().size()).equals(method.parameters())
+                if (c.parameters().size() >= k && c.parameters().subList(k, c.parameters().size()).equals(parameters)
                         && (best == null || total(c) > total(best))) {
                     best = c;   // bridge and synthetic duplicates: the real body has the most instructions
                 }
             }
-            match = best;
-        }
-        if (match == null) {
-            final List<JacocoReports.Method> byArity = new ArrayList<>();
-            for (final JacocoReports.Method c : candidates) {
-                final int size = c.parameters().size();
-                if (size >= n && size <= n + 2) {
-                    byArity.add(c);
-                }
+            if (best != null) {
+                return new Match(best, "exact");
             }
-            if (byArity.size() != 1) {
-                return NONE_UNMATCHED;
-            }
-            match = byArity.get(0);
-            tier = "arity-unique";
         }
-        final JacocoReports.Counter i = match.instructions();
-        final String state = i.covered() == 0 ? "uncovered" : i.missed() == 0 ? "covered" : "partial";
-        final JacocoReports.Counter b = match.branches();
-        return Arrays.asList(state, String.valueOf(i.covered()), String.valueOf(i.missed()),
-                b == null ? "" : String.valueOf(b.covered()), b == null ? "" : String.valueOf(b.missed()), tier);
+        if (!parameters.contains("{undefined}")) {
+            return null;   // only a type Prethink could not resolve justifies guessing by arity
+        }
+        final List<JacocoReports.Method> byArity = new ArrayList<>();
+        for (final JacocoReports.Method c : candidates) {
+            final int size = c.parameters().size();
+            if (size >= parameters.size() && size <= parameters.size() + (constructor ? 2 : 0)) {
+                byArity.add(c);
+            }
+        }
+        return byArity.size() == 1 ? new Match(byArity.get(0), "arity-unique") : null;
+    }
+
+    /** The risk score scaled by the share of the method's instructions that no test reaches. */
+    static String adjustedRisk(final String risk, final JacocoReports.Counter instructions) {
+        final int total = instructions.missed() + instructions.covered();
+        if (total == 0) {
+            return risk;
+        }
+        try {
+            return new BigDecimal(risk.trim()).multiply(BigDecimal.valueOf(instructions.missed()))
+                    .divide(BigDecimal.valueOf(total), 2, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
+        } catch (final NumberFormatException e) {
+            return "";
+        }
+    }
+
+    private static final class Match {
+        private final JacocoReports.Method method;
+        private final String tier;
+
+        Match(final JacocoReports.Method method, final String tier) {
+            this.method = method;
+            this.tier = tier;
+        }
+
+        boolean isBetterThan(final Match other) {
+            if (tier.equals(other.tier)) {
+                return method.instructions().covered() > other.method.instructions().covered();
+            }
+            return tier.equals("exact");
+        }
     }
 
     private static int total(final JacocoReports.Method m) {

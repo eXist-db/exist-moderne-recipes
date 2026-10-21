@@ -38,17 +38,23 @@ columns. Every row and every Prethink column, including `Risk score` and `Gap re
 
 | Column | Value |
 |---|---|
-| `Coverage state` | `covered`, `partial` or `uncovered` (JaCoCo instructions); `no-coverage-data` if the row's module has no report, i.e. its tests did not run; `unmatched` if the module has a report but no method matched |
+| `Coverage state` | `covered`, `partial` or `uncovered` (JaCoCo instructions); `no-coverage-data` if neither the row's module nor any other report holds its class, i.e. its tests did not run; `unmatched` if there is a report for the module or the class but no method matched |
 | `Instructions covered`, `Instructions missed` | JaCoCo instruction counter of the matched method |
 | `Branches covered`, `Branches missed` | JaCoCo branch counter; empty if the method has no branches |
 | `Match tier` | `exact`, `arity-unique` (the only method of compatible arity, for types Prethink could not resolve) or `none` |
+| `Adjusted risk score` | `Risk score` scaled by the share of the method's instructions no test reaches (rounded to two decimals, so `0` for a fully covered method); equal to `Risk score` where there is no match or no instructions |
 
-Options: `jacocoReportsDir` (required; relative to the working directory of the run, or absolute) and
+Options: `jacocoReportsDir` (required; absolute, or relative to the working directory of the run) and
 `testGapsPath` (default `.moderne/context/test-gaps.csv`). If the directory is missing or holds no reports
 the CSV is left unchanged and a warning is logged. Running the recipe again replaces the appended columns.
 
-Coverage is per module and from the unit-test leg only, so code that only another module's tests
-exercise shows as uncovered.
+If several reports hold the same class (reports built from merged execution data of all modules), the
+match with the best coverage wins, so code that only another module's tests exercise counts as covered.
+With one report per module, as `mvn jacoco:report` writes by default, such code shows as uncovered. Coverage
+is from the unit-test leg only.
+
+Run it after a second `mod build` that follows Prethink's `mod git apply`: the recipe edits the file in the
+LST, and a build from before the apply holds a stale copy whose patch does not fit the file on disk.
 
 ## Building
 

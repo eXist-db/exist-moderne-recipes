@@ -109,6 +109,21 @@ final class JacocoReports {
                 .getOrDefault(className + '#' + name, Collections.<Method>emptyList());
     }
 
+    /**
+     * The methods of {@code className} named {@code name}, one list per report that has any. A class normally is in
+     * the report of its own module only; with reports built from merged execution data it may be in several.
+     */
+    List<List<Method>> methodsInAnyReport(final String className, final String name) {
+        final List<List<Method>> found = new ArrayList<>();
+        for (final Map<String, List<Method>> report : modules.values()) {
+            final List<Method> methods = report.get(className + '#' + name);
+            if (methods != null) {
+                found.add(methods);
+            }
+        }
+        return found;
+    }
+
     /** Reads every {@code jacoco.xml} below {@code dir}; the module is the path above {@code target/site/jacoco}. */
     static JacocoReports read(final Path dir) {
         final JacocoReports reports = new JacocoReports();
@@ -117,8 +132,10 @@ final class JacocoReports {
         }
         final List<Path> files;
         try (Stream<Path> walk = Files.walk(dir)) {
-            files = walk.filter(p -> p.getFileName().toString().equals("jacoco.xml")
-                    && p.toString().replace('\\', '/').endsWith(REPORT_SUFFIX)).sorted().collect(Collectors.toList());
+            files = walk.filter(p -> {
+                final String path = p.toString().replace('\\', '/');
+                return path.equals(REPORT_SUFFIX) || path.endsWith('/' + REPORT_SUFFIX);
+            }).sorted().collect(Collectors.toList());
         } catch (final IOException e) {
             throw new UncheckedIOException(e);
         }

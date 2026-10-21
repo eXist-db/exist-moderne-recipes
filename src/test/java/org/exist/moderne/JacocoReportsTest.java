@@ -134,6 +134,33 @@ class JacocoReportsTest {
     }
 
     @Test
+    void listsAClassOfEveryReportThatHoldsIt() throws IOException {
+        write(dir, "exist-core", REPORT.formatted(1));
+        write(dir, "extensions/lucene", REPORT.formatted(1));
+        write(dir, "exist-start", REPORT.formatted(1).replace("a/Foo", "a/Bar"));
+        final JacocoReports reports = JacocoReports.read(dir);
+        assertThat(reports.methodsInAnyReport("a.Foo", "run")).hasSize(2);
+        assertThat(reports.methodsInAnyReport("a.Bar", "run")).hasSize(1);
+        assertThat(reports.methodsInAnyReport("a.Baz", "run")).isEmpty();
+    }
+
+    @Test
+    void ignoresReportsOutsideTheMavenLayout() throws IOException {
+        write(dir, "", REPORT.formatted(1));
+        final Path flat = dir.resolve("exist-core");
+        Files.createDirectories(flat);
+        Files.writeString(flat.resolve("jacoco.xml"), REPORT.formatted(1));
+        final Path lookalike = dir.resolve("mod/xtarget/site/jacoco");
+        Files.createDirectories(lookalike);
+        Files.writeString(lookalike.resolve("jacoco.xml"), REPORT.formatted(1));
+        final JacocoReports reports = JacocoReports.read(dir);
+        assertThat(reports.hasModule("")).isTrue();
+        assertThat(reports.hasModule("exist-core")).isFalse();
+        assertThat(reports.hasModule("mod")).isFalse();
+        assertThat(reports.hasModule("mod/x")).isFalse();
+    }
+
+    @Test
     void missingDirectoryIsEmpty() {
         assertThat(JacocoReports.read(dir.resolve("nope")).isEmpty()).isTrue();
         assertThat(JacocoReports.read(dir).isEmpty()).isTrue();
