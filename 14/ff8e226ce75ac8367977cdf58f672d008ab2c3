@@ -1,0 +1,21 @@
+src/main/java/org/exist/moderne/MethodSignatures.java
+  s_06b0e517581901::t_89ebf419e1ffdb 110-126
+src/test/java/org/exist/moderne/MethodSignaturesTest.java
+  s_06b0e517581901::t_75b593cf1d7e4b 73-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "14ff8e226ce75ac8367977cdf58f672d008ab2c3",
+  "prompts": {},
+  "sessions": {
+    "s_06b0e517581901": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd4189ea-1ea5-4026-bf61-26eb5d055e24",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
