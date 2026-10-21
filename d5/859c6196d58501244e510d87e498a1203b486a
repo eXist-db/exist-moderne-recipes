@@ -1,0 +1,27 @@
+README.md
+  s_06b0e517581901::t_14898bed73b3eb 41
+src/main/java/org/exist/moderne/JacocoReports.java
+  s_06b0e517581901::t_a5741b10dc39d4 135-138
+src/main/java/org/exist/moderne/TestGapsCoverage.java
+  s_06b0e517581901::t_b8e5d3ea7a8595 53-54,92-93,96-107,123-126,131,134,142-146,167,186-188,190,202-204,208
+src/test/java/org/exist/moderne/JacocoReportsTest.java
+  s_06b0e517581901::t_ab63cff0030d34 147-162
+src/test/java/org/exist/moderne/TestGapsCoverageTest.java
+  s_06b0e517581901::t_d046bd95a1aeb2 301-330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d5859c6196d58501244e510d87e498a1203b486a",
+  "prompts": {},
+  "sessions": {
+    "s_06b0e517581901": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd4189ea-1ea5-4026-bf61-26eb5d055e24",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "duncdrum <d.paterson@me.com>"
+    }
+  }
+}
