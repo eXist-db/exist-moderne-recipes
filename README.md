@@ -27,6 +27,29 @@ name), so it can be fooled by two different modules sharing a local name. Treat 
 as a real candidate gap; treat a `true` result as reasonably trustworthy given how specific most
 eXist-db function names are.
 
+### `org.exist.moderne.TestGapsCoverage`
+
+Patches Prethink's `.moderne/context/test-gaps.csv` with real test coverage. Prethink finds untested
+methods from a static call graph, which cannot work for an interpreter: the `eval()` of every builtin
+function and expression is dispatched at runtime, so it is always listed as untested. This recipe joins
+each row to the matching method of the per-module JaCoCo reports (`<module>/target/site/jacoco/jacoco.xml`,
+the files `mvn jacoco:report` writes) by class, method name and erased parameter types, and appends
+columns. Every row and every Prethink column, including `Risk score` and `Gap reason`, is left as it is.
+
+| Column | Value |
+|---|---|
+| `Coverage state` | `covered`, `partial` or `uncovered` (JaCoCo instructions); `no-coverage-data` if the row's module has no report, i.e. its tests did not run; `unmatched` if the module has a report but no method matched |
+| `Instructions covered`, `Instructions missed` | JaCoCo instruction counter of the matched method |
+| `Branches covered`, `Branches missed` | JaCoCo branch counter; empty if the method has no branches |
+| `Match tier` | `exact`, `arity-unique` (the only method of compatible arity, for types Prethink could not resolve) or `none` |
+
+Options: `jacocoReportsDir` (required; relative to the working directory of the run, or absolute) and
+`testGapsPath` (default `.moderne/context/test-gaps.csv`). If the directory is missing or holds no reports
+the CSV is left unchanged and a warning is logged. Running the recipe again replaces the appended columns.
+
+Coverage is per module and from the unit-test leg only, so code that only another module's tests
+exercise shows as uncovered.
+
 ## Building
 
 ```bash
