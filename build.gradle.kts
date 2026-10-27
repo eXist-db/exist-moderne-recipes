@@ -1,6 +1,6 @@
 plugins {
-    id("org.openrewrite.build.recipe-library-base") version "2.27.1"
-    id("org.openrewrite.build.recipe-repositories") version "2.27.1"
+    id("org.openrewrite.build.recipe-library-base") version "2.27.4"
+    id("org.openrewrite.build.recipe-repositories") version "2.27.4"
     `maven-publish`
 }
 
