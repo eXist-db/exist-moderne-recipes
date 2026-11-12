@@ -39,7 +39,7 @@ version = System.getenv("GITHUB_REF_TYPE")
     ?.takeIf { it == "tag" }
     ?.let { System.getenv("GITHUB_REF_NAME").removePrefix("v") }
     ?: findProperty("releaseVersion")?.toString()
-    ?: "1.0.1-SNAPSHOT"
+    ?: "2.0.0-SNAPSHOT"
 description = "Moderne/OpenRewrite recipes for eXist-db."
 
 dependencies {
@@ -51,6 +51,7 @@ dependencies {
     }
 
     implementation("org.openrewrite:rewrite-java")
+    implementation("org.openrewrite:rewrite-xml")
 
     testImplementation("org.openrewrite:rewrite-test") {
         exclude(group = "org.slf4j", module = "slf4j-nop")
